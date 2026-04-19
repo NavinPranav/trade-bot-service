@@ -1,0 +1,2 @@
+CREATE TABLE backtest_jobs(id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(id), strategy_type VARCHAR(30), start_date DATE, end_date DATE, parameters JSONB, status VARCHAR(20) NOT NULL DEFAULT 'PENDING', progress_percent INTEGER DEFAULT 0, sharpe_ratio DOUBLE PRECISION, max_drawdown DOUBLE PRECISION, win_rate DOUBLE PRECISION, total_return DOUBLE PRECISION, total_trades INTEGER, result_details JSONB, created_at TIMESTAMP NOT NULL DEFAULT NOW(), completed_at TIMESTAMP);
+CREATE INDEX idx_backtest_user ON backtest_jobs(user_id);

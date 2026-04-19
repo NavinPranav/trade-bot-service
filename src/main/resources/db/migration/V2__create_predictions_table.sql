@@ -1,0 +1,2 @@
+CREATE TABLE predictions(id BIGSERIAL PRIMARY KEY, prediction_date DATE NOT NULL, horizon VARCHAR(10) NOT NULL, direction VARCHAR(10) NOT NULL, magnitude NUMERIC(6,4), confidence NUMERIC(5,2), predicted_volatility NUMERIC(6,4), actual_direction VARCHAR(10), actual_magnitude NUMERIC(6,4), correct BOOLEAN, created_at TIMESTAMP NOT NULL DEFAULT NOW());
+CREATE INDEX idx_pred_date ON predictions(prediction_date);

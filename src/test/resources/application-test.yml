@@ -1,0 +1,28 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:testdb
+    driver-class-name: org.h2.Driver
+  jpa.hibernate.ddl-auto: create-drop
+  flyway.enabled: false
+  data.redis.port: 0
+app:
+  jwt:
+    secret: dGVzdC1zZWNyZXQta2V5LXRoYXQtaXMtYXQtbGVhc3QtNjQtY2hhcmFjdGVycy1sb25nLWZvci10ZXN0aW5n
+    access-token-expiry-ms: 3600000
+    refresh-token-expiry-ms: 604800000
+  ml-service:
+    host: localhost
+    port: 50051
+    timeout-ms: 5000
+    backtest-timeout-ms: 10000
+  market:
+    angel-one:
+      api-key: test-key
+      client-code: TEST001
+      password: 1234
+      totp-secret: JBSWY3DPEHPK3PXP
+      instruments:
+        - name: SENSEX
+          exchange: bse_cm
+          token: "99919000"
+          exchange-type: 3

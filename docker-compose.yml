@@ -1,0 +1,38 @@
+services:
+  app:
+    build: .
+    container_name: sensex-backend
+    ports: ["8080:8080"]
+    environment:
+      - SPRING_PROFILES_ACTIVE=dev
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=sensex_trader
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - REDIS_HOST=redis
+      - ML_SERVICE_HOST=ml-service
+      - ML_SERVICE_PORT=50051
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_started }
+    networks: [sensex-net]
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    container_name: sensex-postgres
+    ports: ["5432:5432"]
+    environment: { POSTGRES_DB: sensex_trader, POSTGRES_USER: postgres, POSTGRES_PASSWORD: postgres }
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    healthcheck: { test: ["CMD-SHELL","pg_isready -U postgres"], interval: 5s, timeout: 5s, retries: 5 }
+    networks: [sensex-net]
+  redis:
+    image: redis:7-alpine
+    container_name: sensex-redis
+    ports: ["6379:6379"]
+    volumes: [redis_data:/data]
+    networks: [sensex-net]
+volumes:
+  postgres_data:
+  redis_data:
+networks:
+  sensex-net: { driver: bridge }

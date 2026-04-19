@@ -1,0 +1,19 @@
+# Copy to application-local.yml (same folder) and fill in your credentials.
+# application-local.yml is gitignored — do not commit real keys.
+app:
+  # ML gRPC target (must be gRPC port, e.g. 50051 — NOT FastAPI HTTP 8000)
+  # ml-service:
+  #   host: localhost
+  #   port: 50051
+  market:
+    angel-one:
+      api-key: YOUR_ANGELONE_API_KEY
+      client-code: YOUR_CLIENT_CODE
+      password: YOUR_PIN
+      totp-secret: YOUR_BASE32_TOTP_SECRET
+      # Override instruments if needed:
+      # instruments:
+      #   - name: SENSEX
+      #     exchange: bse_cm
+      #     token: "99919000"
+      #     exchange-type: 3

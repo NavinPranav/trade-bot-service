@@ -1,0 +1,2 @@
+CREATE TABLE alerts(id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(id), alert_type VARCHAR(30) NOT NULL, threshold NUMERIC(14,4), description TEXT, active BOOLEAN NOT NULL DEFAULT TRUE, triggered BOOLEAN DEFAULT FALSE, triggered_at TIMESTAMP, created_at TIMESTAMP NOT NULL DEFAULT NOW());
+CREATE INDEX idx_alerts_user ON alerts(user_id, active);

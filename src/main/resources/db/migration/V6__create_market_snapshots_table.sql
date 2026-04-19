@@ -1,0 +1,2 @@
+CREATE TABLE market_snapshots(id BIGSERIAL, timestamp TIMESTAMPTZ NOT NULL, sensex_open NUMERIC(12,2), sensex_high NUMERIC(12,2), sensex_low NUMERIC(12,2), sensex_close NUMERIC(12,2), sensex_volume BIGINT, india_vix NUMERIC(8,4), fii_net_buy NUMERIC(14,2), dii_net_buy NUMERIC(14,2), usd_inr NUMERIC(8,4), PRIMARY KEY(id,timestamp));
+CREATE INDEX idx_snapshot_ts ON market_snapshots(timestamp DESC);

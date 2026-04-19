@@ -1,0 +1,2 @@
+CREATE TABLE positions(id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(id), strategy_type VARCHAR(30), option_type VARCHAR(10), strike_price NUMERIC(12,2) NOT NULL, expiry DATE NOT NULL, lots INTEGER NOT NULL, entry_price NUMERIC(12,2) NOT NULL, exit_price NUMERIC(12,2), current_price NUMERIC(12,2), is_open BOOLEAN NOT NULL DEFAULT TRUE, delta NUMERIC(10,6), gamma NUMERIC(10,6), theta NUMERIC(10,6), vega NUMERIC(10,6), opened_at TIMESTAMP, closed_at TIMESTAMP);
+CREATE INDEX idx_positions_user ON positions(user_id, is_open);
