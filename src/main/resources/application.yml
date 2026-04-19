@@ -7,7 +7,7 @@ spring:
   application:
     name: sensex-option-trader
   datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:sensex_trader}
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:sensex_trader}?sslmode=${DB_SSL_MODE:disable}
     username: ${DB_USER:postgres}
     password: ${DB_PASSWORD:postgres}
     hikari:
@@ -31,6 +31,8 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
+      ssl:
+        enabled: ${REDIS_SSL:false}
   jackson:
     serialization.write-dates-as-timestamps: false
     default-property-inclusion: non_null
@@ -46,6 +48,7 @@ app:
   ml-service:
     host: ${ML_SERVICE_HOST:localhost}
     port: ${ML_SERVICE_PORT:50051}
+    tls: ${ML_SERVICE_TLS:false}
     timeout-ms: 30000
     backtest-timeout-ms: 300000
     live-prediction-interval-ms: ${LIVE_PREDICTION_INTERVAL_MS:15000}

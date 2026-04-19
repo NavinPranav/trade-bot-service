@@ -1,7 +1,14 @@
-FROM eclipse-temurin:21-jre-alpine
+FROM maven:3.9-eclipse-temurin-17-alpine AS build
+WORKDIR /build
+COPY pom.xml .
+RUN mvn dependency:go-offline -B
+COPY src ./src
+RUN mvn package -DskipTests -B
+
+FROM eclipse-temurin:17-jre-alpine
 WORKDIR /app
 RUN addgroup -S app && adduser -S app -G app
-COPY target/sensex-option-trader-*.jar app.jar
+COPY --from=build /build/target/sensex-option-trader-*.jar app.jar
 HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- http://localhost:8080/actuator/health || exit 1
 USER app
 EXPOSE 8080
