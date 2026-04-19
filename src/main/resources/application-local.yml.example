@@ -1,6 +1,8 @@
 # Copy to application-local.yml (same folder) and fill in your credentials.
 # application-local.yml is gitignored — do not commit real keys.
 app:
+  jwt:
+    secret: YOUR_JWT_SECRET_BASE64_MIN_64_CHARS
   # ML gRPC target (must be gRPC port, e.g. 50051 — NOT FastAPI HTTP 8000)
   # ml-service:
   #   host: localhost

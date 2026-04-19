@@ -54,12 +54,12 @@ app:
     trading-hours-end: "15:30"
     timezone: "Asia/Kolkata"
     angel-one:
-      api-key: DZ52YXSh
-      client-code: AAAO703818
-      password: 6680
-      totp-secret: BRQ4Y2FMHMOCPTG7ECNUK72TLE
-      base-url: https://apiconnect.angelone.in
-      ws-url: wss://smartapisocket.angelone.in/smart-stream
+      api-key: ${ANGEL_ONE_API_KEY:}
+      client-code: ${ANGEL_ONE_CLIENT_CODE:}
+      password: ${ANGEL_ONE_PASSWORD:}
+      totp-secret: ${ANGEL_ONE_TOTP_SECRET:}
+      base-url: ${ANGEL_ONE_BASE_URL:https://apiconnect.angelone.in}
+      ws-url: ${ANGEL_ONE_WS_URL:wss://smartapisocket.angelone.in/smart-stream}
       subscription-mode: 3        # 1=LTP, 2=Quote (OHLC+LTP), 3=SnapQuote (full depth)
       reconnect-delay-ms: 5000
       token-refresh-interval-ms: 300000
