@@ -1,5 +1,5 @@
 server:
-  port: 8080
+  port: ${PORT:8080}
 spring:
   # Optional local overrides (gitignored): copy application-local.yml.example → application-local.yml
   config:
