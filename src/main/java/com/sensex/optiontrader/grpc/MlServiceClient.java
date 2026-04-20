@@ -3,8 +3,8 @@ package com.sensex.optiontrader.grpc;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.sensex.optiontrader.config.AngelOneProperties;
 import com.sensex.optiontrader.config.AppProperties;
+import com.sensex.optiontrader.service.InstrumentRegistry;
 import com.sensex.optiontrader.grpc.proto.BacktestProgress;
 import com.sensex.optiontrader.grpc.proto.BacktestRequest;
 import com.sensex.optiontrader.grpc.proto.Empty;
@@ -47,19 +47,19 @@ public class MlServiceClient {
 
     private final ManagedChannel mlServiceChannel;
     private final AppProperties props;
-    private final AngelOneProperties angelOneProps;
+    private final InstrumentRegistry instrumentRegistry;
     private final ObjectMapper objectMapper;
     private final GrpcErrorHandler grpcErrorHandler;
     private final AtomicReference<StreamObserver<LiveTick>> liveTickStream = new AtomicReference<>();
 
     public MlServiceClient(ManagedChannel mlServiceChannel,
                            AppProperties props,
-                           AngelOneProperties angelOneProps,
+                           InstrumentRegistry instrumentRegistry,
                            ObjectMapper objectMapper,
                            GrpcErrorHandler grpcErrorHandler) {
         this.mlServiceChannel = mlServiceChannel;
         this.props = props;
-        this.angelOneProps = angelOneProps;
+        this.instrumentRegistry = instrumentRegistry;
         this.objectMapper = objectMapper;
         this.grpcErrorHandler = grpcErrorHandler;
     }
@@ -415,10 +415,9 @@ public class MlServiceClient {
     }
 
     private String primaryInstrumentName() {
-        if (angelOneProps.instruments() != null && !angelOneProps.instruments().isEmpty()) {
-            return angelOneProps.instruments().get(0).name();
-        }
-        return "";
+        return instrumentRegistry.getPrimary()
+                .map(com.sensex.optiontrader.config.AngelOneProperties.InstrumentToken::name)
+                .orElse("");
     }
 
     private static PredictionResponse fromProto(com.sensex.optiontrader.grpc.proto.PredictionResponse p) {

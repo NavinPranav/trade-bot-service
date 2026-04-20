@@ -47,7 +47,8 @@ public class LiveMarketStreamService {
     private final NotificationService notificationService;
     private final MlServiceClient mlServiceClient;
     private final MarketDataService marketDataService;
-    private final AngelOneProperties props;
+    private final InstrumentRegistry instrumentRegistry;
+    private final AngelOneProperties angelOneProps;
     private final AppProperties appProps;
     private final MlServiceConfigRepository configRepo;
     private final CacheManager cacheManager;
@@ -82,7 +83,8 @@ public class LiveMarketStreamService {
                                    NotificationService notificationService,
                                    MlServiceClient mlServiceClient,
                                    MarketDataService marketDataService,
-                                   AngelOneProperties props,
+                                   InstrumentRegistry instrumentRegistry,
+                                   AngelOneProperties angelOneProps,
                                    AppProperties appProps,
                                    MlServiceConfigRepository configRepo,
                                    CacheManager cacheManager) {
@@ -92,7 +94,8 @@ public class LiveMarketStreamService {
         this.notificationService = notificationService;
         this.mlServiceClient = mlServiceClient;
         this.marketDataService = marketDataService;
-        this.props = props;
+        this.instrumentRegistry = instrumentRegistry;
+        this.angelOneProps = angelOneProps;
         this.appProps = appProps;
         this.configRepo = configRepo;
         this.cacheManager = cacheManager;
@@ -303,9 +306,26 @@ public class LiveMarketStreamService {
                 .orElse(false);
     }
 
+    /**
+     * Called by InstrumentService after the active instrument is changed.
+     * Resubscribes the WebSocket to the new instruments without reconnecting.
+     */
+    public void onInstrumentSwitch() {
+        log.info("Active instrument changed — resubscribing WebSocket");
+        streamScheduler.execute(() -> {
+            try {
+                wsClient.resubscribe();
+            } catch (Exception e) {
+                log.warn("Resubscribe failed, scheduling full reconnect: {}", e.getMessage());
+                scheduleReconnect();
+            }
+        });
+    }
+
     private LiveTickData latestPrimaryTick() {
-        if (props.instruments() == null || props.instruments().isEmpty()) return null;
-        return provider.getLatestTick(props.instruments().get(0).token());
+        return instrumentRegistry.getPrimary()
+                .map(i -> provider.getLatestTick(i.token()))
+                .orElse(null);
     }
 
     private void broadcastToFrontend(LiveTickData tick) {
@@ -365,7 +385,7 @@ public class LiveMarketStreamService {
         if (!reconnecting.compareAndSet(false, true)) {
             return;
         }
-        long delay = props.reconnectDelayMs();
+        long delay = angelOneProps.reconnectDelayMs();
         streamScheduler.schedule(() -> {
             try {
                 if (!authService.isAuthenticated()) {

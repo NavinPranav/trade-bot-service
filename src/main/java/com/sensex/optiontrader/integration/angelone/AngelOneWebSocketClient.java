@@ -3,6 +3,7 @@ package com.sensex.optiontrader.integration.angelone;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sensex.optiontrader.config.AngelOneProperties;
 import com.sensex.optiontrader.config.AngelOneProperties.InstrumentToken;
+import com.sensex.optiontrader.service.InstrumentRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -61,6 +62,7 @@ public class AngelOneWebSocketClient {
 
     private final AngelOneProperties props;
     private final AngelOneAuthService authService;
+    private final InstrumentRegistry instrumentRegistry;
     private final ObjectMapper objectMapper;
     private final List<Consumer<LiveTickData>> listeners = new CopyOnWriteArrayList<>();
     private final AtomicReference<WebSocket> wsRef = new AtomicReference<>();
@@ -70,9 +72,11 @@ public class AngelOneWebSocketClient {
 
     public AngelOneWebSocketClient(AngelOneProperties props,
                                    AngelOneAuthService authService,
+                                   InstrumentRegistry instrumentRegistry,
                                    ObjectMapper objectMapper) {
         this.props = props;
         this.authService = authService;
+        this.instrumentRegistry = instrumentRegistry;
         this.objectMapper = objectMapper;
     }
 
@@ -186,10 +190,49 @@ public class AngelOneWebSocketClient {
         log.info("Angel One WebSocket disconnected");
     }
 
+    /**
+     * Resubscribes the existing WebSocket to the current active instruments from the DB.
+     * Call after switching the active instrument via the API.
+     */
+    public void resubscribe() {
+        WebSocket ws = wsRef.get();
+        if (ws == null || ws.isOutputClosed()) {
+            log.warn("Cannot resubscribe — WebSocket not connected");
+            return;
+        }
+        unsubscribe(ws);
+        subscribe(ws);
+    }
+
+    private void unsubscribe(WebSocket ws) {
+        List<InstrumentToken> instruments = instrumentRegistry.getActiveInstruments();
+        if (instruments.isEmpty()) return;
+
+        Map<Integer, List<String>> byExchange = new LinkedHashMap<>();
+        for (InstrumentToken inst : instruments) {
+            byExchange.computeIfAbsent(inst.exchangeType(), k -> new ArrayList<>()).add(inst.token());
+        }
+        List<Map<String, Object>> tokenList = new ArrayList<>();
+        byExchange.forEach((exType, tokens) ->
+                tokenList.add(Map.of("exchangeType", exType, "tokens", tokens)));
+
+        Map<String, Object> msg = Map.of(
+                "correlationID", "unsub_" + System.currentTimeMillis(),
+                "action", 2,
+                "params", Map.of("mode", props.subscriptionMode(), "tokenList", tokenList)
+        );
+        try {
+            ws.sendText(objectMapper.writeValueAsString(msg), true);
+            log.info("Angel One unsubscribed from {} instruments", instruments.size());
+        } catch (Exception e) {
+            log.warn("Failed to send unsubscribe: {}", e.getMessage());
+        }
+    }
+
     private void subscribe(WebSocket ws) {
-        List<InstrumentToken> instruments = props.instruments();
-        if (instruments == null || instruments.isEmpty()) {
-            log.warn("No instruments configured for Angel One streaming");
+        List<InstrumentToken> instruments = instrumentRegistry.getActiveInstruments();
+        if (instruments.isEmpty()) {
+            log.warn("No active instruments in DB for Angel One streaming");
             return;
         }
 

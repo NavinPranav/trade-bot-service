@@ -1,8 +1,7 @@
 package com.sensex.optiontrader.integration.angelone;
 
-import com.sensex.optiontrader.config.AngelOneProperties;
-import com.sensex.optiontrader.config.AngelOneProperties.InstrumentToken;
 import com.sensex.optiontrader.integration.MarketDataProvider;
+import com.sensex.optiontrader.service.InstrumentRegistry;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -21,7 +20,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class AngelOneMarketDataProvider implements MarketDataProvider {
 
     private final AngelOneHistoricalClient historicalClient;
-    private final AngelOneProperties props;
+    private final InstrumentRegistry instrumentRegistry;
 
     /**
      * Most recent live tick per instrument token, updated by the streaming service.
@@ -55,12 +54,8 @@ public class AngelOneMarketDataProvider implements MarketDataProvider {
     }
 
     private LiveTickData findLiveVixTick() {
-        if (props.instruments() == null) return null;
-        return props.instruments().stream()
-                .filter(i -> "INDIA VIX".equalsIgnoreCase(i.name()))
+        return instrumentRegistry.findByName("INDIA VIX")
                 .map(i -> latestTicks.get(i.token()))
-                .filter(t -> t != null)
-                .findFirst()
                 .orElse(null);
     }
 
@@ -79,11 +74,6 @@ public class AngelOneMarketDataProvider implements MarketDataProvider {
     }
 
     public String resolveInstrumentName(String token) {
-        if (props.instruments() == null) return token;
-        return props.instruments().stream()
-                .filter(i -> token.equals(i.token()))
-                .map(InstrumentToken::name)
-                .findFirst()
-                .orElse(token);
+        return instrumentRegistry.resolveInstrumentName(token);
     }
 }

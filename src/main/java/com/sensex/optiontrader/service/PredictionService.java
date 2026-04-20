@@ -1,8 +1,6 @@
 package com.sensex.optiontrader.service;
 
-import com.sensex.optiontrader.config.AngelOneProperties;
 import com.sensex.optiontrader.exception.MlServiceUnavailableException;
-import com.sensex.optiontrader.exception.ResourceNotFoundException;
 import com.sensex.optiontrader.grpc.MlServiceClient;
 import com.sensex.optiontrader.integration.MarketDataProvider;
 import com.sensex.optiontrader.integration.angelone.LiveTickData;
@@ -26,7 +24,7 @@ public class PredictionService {
     private final MlServiceClient ml;
     private final MarketDataService marketData;
     private final MarketDataProvider marketDataProvider;
-    private final AngelOneProperties angelOneProps;
+    private final InstrumentRegistry instrumentRegistry;
     private final MlServiceConfigRepository configRepo;
 
     private record HorizonSpec(String period, String interval) {}
@@ -108,12 +106,9 @@ public class PredictionService {
         return m;
     }
 
-    /** Returns the latest live tick for the primary instrument (e.g. SENSEX), or null if streaming is idle. */
     private LiveTickData latestPrimaryTick() {
-        if (angelOneProps.instruments() == null || angelOneProps.instruments().isEmpty()) {
-            return null;
-        }
-        String primaryToken = angelOneProps.instruments().get(0).token();
-        return marketDataProvider.getLatestTick(primaryToken);
+        return instrumentRegistry.getPrimary()
+                .map(i -> marketDataProvider.getLatestTick(i.token()))
+                .orElse(null);
     }
 }

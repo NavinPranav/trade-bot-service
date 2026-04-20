@@ -2,8 +2,8 @@ package com.sensex.optiontrader.integration.angelone;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.sensex.optiontrader.config.AngelOneProperties;
 import com.sensex.optiontrader.config.AngelOneProperties.InstrumentToken;
+import com.sensex.optiontrader.service.InstrumentRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -27,16 +27,16 @@ public class AngelOneHistoricalClient {
     private static final DateTimeFormatter ANGEL_TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
     private static final DateTimeFormatter ISO_TS = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
 
-    private final AngelOneProperties props;
+    private final InstrumentRegistry instrumentRegistry;
     private final AngelOneAuthService authService;
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
 
-    public AngelOneHistoricalClient(AngelOneProperties props,
+    public AngelOneHistoricalClient(InstrumentRegistry instrumentRegistry,
                                     AngelOneAuthService authService,
                                     RestClient angelOneRestClient,
                                     ObjectMapper objectMapper) {
-        this.props = props;
+        this.instrumentRegistry = instrumentRegistry;
         this.authService = authService;
         this.restClient = angelOneRestClient;
         this.objectMapper = objectMapper;
@@ -101,7 +101,7 @@ public class AngelOneHistoricalClient {
                 "todate", end.format(ANGEL_TS)
         );
 
-        log.debug("Historical candle request: {}", body);
+        log.debug("Historical candle request: {} (JWT present: {})", body, jwt.length() > 10);
 
         try {
             String raw = restClient.post()
@@ -113,12 +113,15 @@ public class AngelOneHistoricalClient {
 
             JsonNode root = objectMapper.readTree(raw);
             if (!root.path("status").asBoolean(false)) {
-                log.warn("Angel One historical API error: {}", root.path("message").asText());
+                log.warn("Angel One historical API error: status=false response={}", raw);
                 return List.of();
             }
 
             JsonNode data = root.path("data");
-            if (!data.isArray()) return List.of();
+            if (!data.isArray() || data.isEmpty()) {
+                log.warn("Angel One historical API returned no candle data: {}", raw);
+                return List.of();
+            }
 
             List<Map<String, Object>> rows = new ArrayList<>(data.size());
             for (JsonNode candle : data) {
@@ -141,16 +144,11 @@ public class AngelOneHistoricalClient {
     }
 
     private InstrumentToken primaryInstrument() {
-        List<InstrumentToken> instruments = props.instruments();
-        return (instruments != null && !instruments.isEmpty()) ? instruments.get(0) : null;
+        return instrumentRegistry.getPrimary().orElse(null);
     }
 
     private InstrumentToken findInstrument(String name) {
-        if (props.instruments() == null) return null;
-        return props.instruments().stream()
-                .filter(i -> name.equalsIgnoreCase(i.name()))
-                .findFirst()
-                .orElse(null);
+        return instrumentRegistry.findByName(name).orElse(null);
     }
 
     private static String resolveExchange(String exchange) {

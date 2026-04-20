@@ -67,10 +67,10 @@ app:
       reconnect-delay-ms: 5000
       token-refresh-interval-ms: 300000
       instruments:
-        - name: CRUDE OIL
-          exchange: mcx_fo
-          token: "486502"          # CRUDEOIL20APR26FUT (expiry 20APR2026)
-          exchange-type: 5         # 5 = MCX
+        - name: BANKNIFTY
+          exchange: nse_cm
+          token: "99926009"
+          exchange-type: 1         # 1 = NSE
   cache:
     prediction-ttl: 300
     options-chain-ttl: 180
