@@ -1,6 +1,7 @@
 package com.sensex.optiontrader.service;
 
 import com.sensex.optiontrader.exception.MlServiceUnavailableException;
+import com.sensex.optiontrader.grpc.MlRestClient;
 import com.sensex.optiontrader.grpc.MlServiceClient;
 import com.sensex.optiontrader.integration.MarketDataProvider;
 import com.sensex.optiontrader.integration.angelone.LiveTickData;
@@ -22,6 +23,7 @@ import java.util.stream.Collectors;
 public class PredictionService {
     private final PredictionRepository repo;
     private final MlServiceClient ml;
+    private final MlRestClient mlRest;
     private final MarketDataService marketData;
     private final MarketDataProvider marketDataProvider;
     private final InstrumentRegistry instrumentRegistry;
@@ -43,36 +45,48 @@ public class PredictionService {
 
     @Cacheable(value = "predictions", key = "'v5-'+#horizon")
     public PredictionResponse getLatestPrediction(String horizon) {
-        Exception mlError = null;
-        try {
-            HorizonSpec spec = horizonSpec(horizon);
-            var ohlcv = marketData.getSensexOhlcv(spec.period(), spec.interval());
-            var indiaVixHistory = marketData.getIndiaVixHistory();
-            LiveTickData liveTick = latestPrimaryTick();
+        HorizonSpec spec = horizonSpec(horizon);
+        var ohlcv = marketData.getSensexOhlcv(spec.period(), spec.interval());
+        var indiaVixHistory = marketData.getIndiaVixHistory();
+        LiveTickData liveTick = latestPrimaryTick();
+        String engine = isAiEngine() ? "AI" : "ML";
 
-            if (isAiEngine()) {
-                log.debug("prediction_engine=AI → routing to GetGeminiPrediction");
+        // 1) Try gRPC
+        try {
+            if ("AI".equals(engine)) {
+                log.debug("prediction_engine=AI → routing to GetGeminiPrediction (gRPC)");
                 return ml.getGeminiPrediction(horizon, ohlcv, indiaVixHistory, liveTick);
             }
             return ml.getPrediction(horizon, ohlcv, indiaVixHistory, liveTick);
-        } catch (Exception e) {
-            log.warn("ML service call failed, trying DB fallback: {}", e.getMessage());
-            mlError = e;
+        } catch (Exception grpcErr) {
+            log.warn("gRPC prediction failed, trying HTTP REST fallback: {}", grpcErr.getMessage());
+
+            // 2) Try HTTP REST fallback
+            if (mlRest.isConfigured()) {
+                try {
+                    log.debug("prediction_engine={} → routing to REST /predict", engine);
+                    return mlRest.predict(engine, horizon, ohlcv, indiaVixHistory, liveTick);
+                } catch (Exception restErr) {
+                    log.warn("HTTP REST prediction also failed: {}", restErr.getMessage());
+                }
+            }
+
+            // 3) Try DB fallback
+            var dbFallback = repo.findTopByHorizonOrderByPredictionDateDesc(horizon);
+            if (dbFallback.isPresent()) {
+                var p = dbFallback.get();
+                return PredictionResponse.builder()
+                        .predictionDate(p.getPredictionDate())
+                        .horizon(p.getHorizon())
+                        .direction(p.getDirection())
+                        .magnitude(p.getMagnitude())
+                        .confidence(p.getConfidence())
+                        .predictedVolatility(p.getPredictedVolatility())
+                        .build();
+            }
+            throw new MlServiceUnavailableException(
+                    "ML service unreachable and no cached predictions for horizon: " + horizon, grpcErr);
         }
-        var dbFallback = repo.findTopByHorizonOrderByPredictionDateDesc(horizon);
-        if (dbFallback.isPresent()) {
-            var p = dbFallback.get();
-            return PredictionResponse.builder()
-                    .predictionDate(p.getPredictionDate())
-                    .horizon(p.getHorizon())
-                    .direction(p.getDirection())
-                    .magnitude(p.getMagnitude())
-                    .confidence(p.getConfidence())
-                    .predictedVolatility(p.getPredictedVolatility())
-                    .build();
-        }
-        throw new MlServiceUnavailableException(
-                "ML service unreachable and no cached predictions for horizon: " + horizon, mlError);
     }
 
     /** Returns true when the ml_service_config table has prediction_engine=AI. */

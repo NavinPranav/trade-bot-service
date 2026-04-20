@@ -52,6 +52,7 @@ app:
     timeout-ms: 30000
     backtest-timeout-ms: 300000
     live-prediction-interval-ms: ${LIVE_PREDICTION_INTERVAL_MS:15000}
+    http-url: ${ML_SERVICE_HTTP_URL:}
   market:
     trading-hours-start: "09:15"
     trading-hours-end: "15:30"
