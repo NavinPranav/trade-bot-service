@@ -27,6 +27,8 @@ public class PredictionResponse {
     private BigDecimal targetSensex;
     /** User-visible notice when Gemini quota/rate limit forced a placeholder prediction. */
     private String aiQuotaNotice;
+    /** Gemini (or future engines): why this direction/magnitude was chosen; shown in UI. */
+    private String predictionReason;
 
     @JsonProperty("currentPrice")
     public BigDecimal getCurrentPrice() {

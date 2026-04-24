@@ -431,6 +431,7 @@ public class MlServiceClient {
             date = LocalDate.now();
         }
         String quota = p.getAiQuotaNotice();
+        String reason = p.getPredictionReason();
         return PredictionResponse.builder()
                 .predictionDate(date)
                 .horizon(p.getHorizon())
@@ -441,6 +442,7 @@ public class MlServiceClient {
                 .currentSensex(p.getCurrentSensex() != 0 ? BigDecimal.valueOf(p.getCurrentSensex()) : null)
                 .targetSensex(p.getTargetSensex() != 0 ? BigDecimal.valueOf(p.getTargetSensex()) : null)
                 .aiQuotaNotice(quota != null && !quota.isBlank() ? quota : null)
+                .predictionReason(reason != null && !reason.isBlank() ? reason : null)
                 .build();
     }
 

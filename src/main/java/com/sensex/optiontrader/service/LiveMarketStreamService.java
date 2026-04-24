@@ -325,6 +325,9 @@ public class LiveMarketStreamService {
             if (result.getAiQuotaNotice() != null && !result.getAiQuotaNotice().isBlank()) {
                 payload.put("aiQuotaNotice", result.getAiQuotaNotice());
             }
+            if (result.getPredictionReason() != null && !result.getPredictionReason().isBlank()) {
+                payload.put("predictionReason", result.getPredictionReason());
+            }
             payload.put("live", predictionSubscribers.containsKey(userId));
             notificationService.sendPredictionToUser(email, payload);
 

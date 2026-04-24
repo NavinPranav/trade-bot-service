@@ -181,6 +181,8 @@ public class MlRestClient {
         }
         Object qn = r.get("ai_quota_notice");
         String quota = qn != null && !qn.toString().isBlank() ? qn.toString().trim() : null;
+        Object pr = r.get("prediction_reason");
+        String reason = pr != null && !pr.toString().isBlank() ? pr.toString().trim() : null;
         return PredictionResponse.builder()
                 .predictionDate(date)
                 .horizon(String.valueOf(r.getOrDefault("horizon", "")))
@@ -191,6 +193,7 @@ public class MlRestClient {
                 .currentSensex(toBigDecimal(r.get("current_sensex")))
                 .targetSensex(toBigDecimal(r.get("target_sensex")))
                 .aiQuotaNotice(quota)
+                .predictionReason(reason)
                 .build();
     }
 
