@@ -43,15 +43,14 @@ public class AngelOneHistoricalClient {
     }
 
     /**
-     * Fetches OHLCV candle data for the primary instrument (first configured instrument, typically SENSEX).
+     * Fetches OHLCV candle data for the given instrument (e.g. user's preferred underlying).
      *
      * @param start    start datetime
      * @param end      end datetime
      * @param interval bar interval: "1M", "5M", "15M", "30M", "1H", "1D"
      * @return list of OHLCV maps with keys: timestamp, open, high, low, close, volume
      */
-    public List<Map<String, Object>> getOhlcv(LocalDateTime start, LocalDateTime end, String interval) {
-        InstrumentToken inst = primaryInstrument();
+    public List<Map<String, Object>> getOhlcv(InstrumentToken inst, LocalDateTime start, LocalDateTime end, String interval) {
         if (inst == null) return List.of();
         return fetchCandles(inst, start, end, toAngelInterval(interval));
     }
@@ -141,10 +140,6 @@ public class AngelOneHistoricalClient {
             log.warn("Angel One historical fetch failed: {}", e.getMessage());
             return List.of();
         }
-    }
-
-    private InstrumentToken primaryInstrument() {
-        return instrumentRegistry.getPrimary().orElse(null);
     }
 
     private InstrumentToken findInstrument(String name) {

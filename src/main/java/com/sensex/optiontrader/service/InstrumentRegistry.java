@@ -7,57 +7,79 @@ import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
- * Runtime holder for the active instrument list.
- * On startup, loads active instruments from the DB and converts them to
- * {@link InstrumentToken} records so existing code (WebSocket, historical client, etc.)
- * works unchanged.
+ * Resolves instruments for streaming (Angel One) and the primary underlying for predictions.
+ * Showcase mode: only Bank Nifty is streamed and used as the primary instrument (no multi-symbol mix).
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class InstrumentRegistry {
 
-    private final InstrumentRepository repo;
-    private final CopyOnWriteArrayList<InstrumentToken> activeTokens = new CopyOnWriteArrayList<>();
+    private final InstrumentRepository instrumentRepository;
+    private final CopyOnWriteArrayList<InstrumentToken> streamingTokens = new CopyOnWriteArrayList<>();
 
     @PostConstruct
     void init() {
-        reload();
+        refreshStreamingSubscriptions();
     }
 
-    public void reload() {
-        List<Instrument> active = repo.findByActiveTrueOrderByDisplayOrder();
-        activeTokens.clear();
-        activeTokens.addAll(active.stream().map(InstrumentRegistry::toToken).toList());
-        log.info("InstrumentRegistry loaded {} active instruments", activeTokens.size());
+    /**
+     * Angel One subscribes to Bank Nifty only so live ticks and UI prices stay in one unit / one index.
+     */
+    public synchronized void refreshStreamingSubscriptions() {
+        streamingTokens.clear();
+        instrumentRepository.findByNameIgnoreCase("BANKNIFTY").ifPresentOrElse(
+                b -> {
+                    streamingTokens.add(toToken(b));
+                    log.info("Streaming registry: Bank Nifty only ({} token {}) for Angel One",
+                            b.getName(), b.getToken());
+                },
+                () -> log.warn("BANKNIFTY not found in instruments table — Angel One streaming list is empty")
+        );
     }
 
+    /** Tokens Angel One should subscribe to (Bank Nifty only). */
     public List<InstrumentToken> getActiveInstruments() {
-        return List.copyOf(activeTokens);
+        return List.copyOf(streamingTokens);
     }
 
-    public Optional<InstrumentToken> getPrimary() {
-        return activeTokens.isEmpty() ? Optional.empty() : Optional.of(activeTokens.get(0));
+    /** Primary underlying for OHLCV, predictions, and live ticker — always Bank Nifty (showcase). */
+    @Transactional(readOnly = true)
+    public Optional<InstrumentToken> getPrimaryForUser(Long userId) {
+        return defaultBankNifty();
+    }
+
+    private Optional<InstrumentToken> defaultBankNifty() {
+        return instrumentRepository.findByNameIgnoreCase("BANKNIFTY").map(InstrumentRegistry::toToken);
     }
 
     public Optional<InstrumentToken> findByToken(String token) {
-        return activeTokens.stream().filter(t -> t.token().equals(token)).findFirst();
+        return streamingTokens.stream()
+                .filter(t -> t.token().equals(token))
+                .findFirst()
+                .or(() -> instrumentRepository.findByToken(token).map(InstrumentRegistry::toToken));
     }
 
     public Optional<InstrumentToken> findByName(String name) {
-        return activeTokens.stream()
-                .filter(t -> t.name().equalsIgnoreCase(name))
-                .findFirst();
+        return instrumentRepository.findByNameIgnoreCase(name).map(InstrumentRegistry::toToken);
     }
 
     public String resolveInstrumentName(String token) {
-        return findByToken(token).map(InstrumentToken::name).orElse(token);
+        return instrumentRepository.findByToken(token)
+                .map(Instrument::getName)
+                .orElse(token);
+    }
+
+    /** Used by Spring @Cacheable on predictions so cache invalidates when the user switches instrument. */
+    public String primaryTokenOrNone(Long userId) {
+        return getPrimaryForUser(userId).map(InstrumentToken::token).orElse("none");
     }
 
     static InstrumentToken toToken(Instrument i) {

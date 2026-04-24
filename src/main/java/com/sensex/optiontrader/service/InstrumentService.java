@@ -3,9 +3,12 @@ package com.sensex.optiontrader.service;
 import com.sensex.optiontrader.exception.BadRequestException;
 import com.sensex.optiontrader.exception.ResourceNotFoundException;
 import com.sensex.optiontrader.model.entity.Instrument;
+import com.sensex.optiontrader.model.entity.User;
 import com.sensex.optiontrader.repository.InstrumentRepository;
+import com.sensex.optiontrader.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,81 +20,76 @@ import java.util.List;
 public class InstrumentService {
 
     private final InstrumentRepository repo;
+    private final UserRepository userRepo;
     private final InstrumentRegistry registry;
     private final LiveMarketStreamService liveStream;
 
+    /** Showcase: Bank Nifty only (no multi-instrument picker). */
     public List<Instrument> getAllInstruments() {
-        return repo.findAllByOrderByDisplayOrder();
+        return repo.findByNameIgnoreCase("BANKNIFTY").map(List::of).orElseGet(List::of);
     }
 
     public List<Instrument> getByMarketType(String marketType) {
-        return repo.findByMarketTypeOrderByDisplayOrder(marketType.toUpperCase());
+        return repo.findByNameIgnoreCase("BANKNIFTY")
+                .filter(i -> marketType != null && marketType.equalsIgnoreCase(i.getMarketType()))
+                .map(List::of)
+                .orElseGet(List::of);
     }
 
-    public List<Instrument> getActiveInstruments() {
-        return repo.findByActiveTrueOrderByDisplayOrder();
+    /** Active underlying for the user — Bank Nifty only. */
+    @Transactional(readOnly = true)
+    public List<Instrument> getActiveInstrumentsForUser(Long userId) {
+        userRepo.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
+        return repo.findByNameIgnoreCase("BANKNIFTY")
+                .map(List::of)
+                .orElseThrow(() -> new ResourceNotFoundException("Instrument", "name", "BANKNIFTY"));
     }
 
     /**
-     * Switches the active instrument: deactivates all currently active instruments
-     * and activates the one with the given ID. Reloads the registry and signals
-     * the WebSocket to resubscribe.
-     *
-     * @return the newly activated instrument
+     * Sets the user's preferred instrument (market selection). Does not mutate global {@code instruments.active}.
      */
     @Transactional
-    public Instrument switchActive(Long instrumentId) {
+    @CacheEvict(value = {"marketData", "predictions"}, allEntries = true)
+    public Instrument switchActive(Long userId, Long instrumentId) {
+        User user = userRepo.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
         Instrument target = repo.findById(instrumentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Instrument", "id", instrumentId));
-
-        List<Instrument> currentlyActive = repo.findByActiveTrueOrderByDisplayOrder();
-        for (Instrument inst : currentlyActive) {
-            inst.setActive(false);
+        Instrument bankNifty = repo.findByNameIgnoreCase("BANKNIFTY")
+                .orElseThrow(() -> new BadRequestException("BANKNIFTY is not configured"));
+        if (!bankNifty.getId().equals(target.getId())) {
+            throw new BadRequestException("Only Bank Nifty is available");
         }
-        repo.saveAll(currentlyActive);
 
-        target.setActive(true);
-        repo.save(target);
+        user.setPreferredInstrument(target);
+        userRepo.save(user);
 
-        registry.reload();
+        registry.refreshStreamingSubscriptions();
         liveStream.onInstrumentSwitch();
-        log.info("Switched active instrument to: {} ({})", target.getDisplayName(), target.getToken());
+        log.info("User {} switched preferred instrument to: {} ({})", userId, target.getDisplayName(), target.getToken());
         return target;
     }
 
     /**
-     * Activates an additional instrument (multi-instrument streaming).
+     * Kept for API compatibility: same as switching the user's sole active instrument.
      */
     @Transactional
-    public Instrument activate(Long instrumentId) {
-        Instrument target = repo.findById(instrumentId)
-                .orElseThrow(() -> new ResourceNotFoundException("Instrument", "id", instrumentId));
-        if (target.isActive()) {
-            throw new BadRequestException("Instrument is already active: " + target.getName());
-        }
-        target.setActive(true);
-        repo.save(target);
-        registry.reload();
-        liveStream.onInstrumentSwitch();
-        log.info("Activated instrument: {} ({})", target.getDisplayName(), target.getToken());
-        return target;
+    public Instrument activate(Long userId, Long instrumentId) {
+        return switchActive(userId, instrumentId);
     }
 
-    /**
-     * Deactivates an instrument.
-     */
     @Transactional
-    public Instrument deactivate(Long instrumentId) {
+    public Instrument deactivate(Long userId, Long instrumentId) {
+        User user = userRepo.findByIdWithPreferredInstrument(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
         Instrument target = repo.findById(instrumentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Instrument", "id", instrumentId));
-        if (!target.isActive()) {
-            throw new BadRequestException("Instrument is already inactive: " + target.getName());
+        if (!target.getId().equals(user.getPreferredInstrument().getId())) {
+            throw new BadRequestException("Instrument is not the user's current selection");
         }
-        target.setActive(false);
-        repo.save(target);
-        registry.reload();
-        liveStream.onInstrumentSwitch();
-        log.info("Deactivated instrument: {} ({})", target.getDisplayName(), target.getToken());
-        return target;
+        Instrument bankNifty = repo.findByNameIgnoreCase("BANKNIFTY")
+                .orElseThrow(() -> new BadRequestException("Default instrument BANKNIFTY not configured"));
+        return switchActive(userId, bankNifty.getId());
     }
 }

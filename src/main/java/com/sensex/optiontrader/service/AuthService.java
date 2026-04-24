@@ -5,6 +5,7 @@ import com.sensex.optiontrader.exception.*;
 import com.sensex.optiontrader.model.dto.request.*;
 import com.sensex.optiontrader.model.dto.response.AuthResponse;
 import com.sensex.optiontrader.model.entity.User;
+import com.sensex.optiontrader.repository.InstrumentRepository;
 import com.sensex.optiontrader.repository.UserRepository;
 import com.sensex.optiontrader.security.*;
 import lombok.RequiredArgsConstructor;
@@ -17,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service @RequiredArgsConstructor
 public class AuthService {
     private final UserRepository userRepo;
+    private final InstrumentRepository instrumentRepo;
     private final PasswordEncoder passwordEncoder;
     private final AuthenticationManager authManager;
     private final JwtTokenProvider tokenProvider;
@@ -24,7 +26,14 @@ public class AuthService {
 
     @Transactional public AuthResponse register(RegisterRequest req) {
         if (userRepo.existsByEmail(req.getEmail())) throw new BadRequestException("Email already registered");
-        var user = User.builder().name(req.getName()).email(req.getEmail()).password(passwordEncoder.encode(req.getPassword())).build();
+        var bankNifty = instrumentRepo.findByNameIgnoreCase("BANKNIFTY")
+                .orElseThrow(() -> new BadRequestException("Default instrument BANKNIFTY is not configured"));
+        var user = User.builder()
+                .name(req.getName())
+                .email(req.getEmail())
+                .password(passwordEncoder.encode(req.getPassword()))
+                .preferredInstrument(bankNifty)
+                .build();
         userRepo.save(user);
         var auth = authManager.authenticate(new UsernamePasswordAuthenticationToken(req.getEmail(), req.getPassword()));
         return buildAuth(auth, user);

@@ -39,6 +39,7 @@ spring:
     time-zone: Asia/Kolkata
 app:
   jwt:
+    # Dev-only default; override JWT_SECRET in every deployed environment (never rely on this value in prod).
     secret: ${JWT_SECRET:Y2hhbmdlLW1lLWluLXByb2R1Y3Rpb24tdXNlLWF0LWxlYXN0LTY0LWNoYXJzLWxvbmchIQ==}
     access-token-expiry-ms: 3600000
     refresh-token-expiry-ms: 604800000
@@ -51,7 +52,8 @@ app:
     tls: ${ML_SERVICE_TLS:false}
     timeout-ms: 30000
     backtest-timeout-ms: 300000
-    live-prediction-interval-ms: ${LIVE_PREDICTION_INTERVAL_MS:15000}
+    # Showcase default: less frequent than 15s so “Current” / signal does not churn as often (override with LIVE_PREDICTION_INTERVAL_MS).
+    live-prediction-interval-ms: ${LIVE_PREDICTION_INTERVAL_MS:60000}
     http-url: ${ML_SERVICE_HTTP_URL:}
   market:
     trading-hours-start: "09:15"
@@ -64,7 +66,8 @@ app:
       totp-secret: ${ANGEL_ONE_TOTP_SECRET:}
       base-url: ${ANGEL_ONE_BASE_URL:https://apiconnect.angelone.in}
       ws-url: ${ANGEL_ONE_WS_URL:wss://smartapisocket.angelone.in/smart-stream}
-      subscription-mode: 3        # 1=LTP, 2=Quote (OHLC+LTP), 3=SnapQuote (full depth)
+      # 1=LTP (51 B), 2=Quote (123 B), 3=SnapQuote (379 B) — parser must match Angel smartWebSocketV2.py
+      subscription-mode: 3
       reconnect-delay-ms: 5000
       token-refresh-interval-ms: 300000
       instruments:

@@ -55,6 +55,8 @@ message PredictionRequest {
   SensexQuote sensex_quote = 4;
   // e.g. RELIANCE.BSE — must match backend field number if you rename in Java (wire uses numbers only).
   string underlying_symbol = 5;
+  // Angel One instrument token — same as LiveTick.token so ML can match stream ticks to this baseline.
+  string instrument_token = 6;
 }
 
 message PredictionResponse {
@@ -66,6 +68,8 @@ message PredictionResponse {
   double predicted_volatility = 6;
   double current_sensex = 7;
   double target_sensex = 8;
+  // Non-empty when Gemini returned 429 (quota/rate limit) and a HOLD placeholder was used.
+  string ai_quota_notice = 9;
 }
 
 message VolatilityRequest {

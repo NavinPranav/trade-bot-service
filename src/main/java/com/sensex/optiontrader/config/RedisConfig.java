@@ -1,8 +1,7 @@
 package com.sensex.optiontrader.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.sensex.optiontrader.model.dto.response.PredictionResponse;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.cache.CacheManager;
 import org.springframework.context.annotation.Bean;
@@ -29,20 +28,14 @@ public class RedisConfig {
     }
 
     /**
-     * Only for the {@code predictions} {@link CacheManager} entry: no-arg
-     * {@link GenericJackson2JsonRedisSerializer} enables Jackson default typing so
-     * {@code @Cacheable} can return {@link com.sensex.optiontrader.model.dto.response.PredictionResponse}
-     * instead of {@link java.util.LinkedHashMap}. Do not use this for {@code marketData}.
+     * Only for the {@code predictions} cache: typed serializer so round-trips always yield
+     * {@link PredictionResponse}. Default-typing {@link GenericJackson2JsonRedisSerializer} was
+     * brittle (500 on cache hit after tab switches) when combined with this DTO's shape.
      */
     @Bean
     @Qualifier("predictionCacheValueSerializer")
-    public GenericJackson2JsonRedisSerializer predictionCacheValueSerializer() {
-        GenericJackson2JsonRedisSerializer json = new GenericJackson2JsonRedisSerializer();
-        json.configure(mapper -> {
-            mapper.registerModule(new JavaTimeModule());
-            mapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
-        });
-        return json;
+    public Jackson2JsonRedisSerializer<PredictionResponse> predictionCacheValueSerializer(ObjectMapper objectMapper) {
+        return new Jackson2JsonRedisSerializer<>(objectMapper, PredictionResponse.class);
     }
 
     @Bean
@@ -62,7 +55,7 @@ public class RedisConfig {
     public CacheManager cacheManager(
             RedisConnectionFactory f,
             @Qualifier("redisCacheValueSerializer") GenericJackson2JsonRedisSerializer redisCacheValueSerializer,
-            @Qualifier("predictionCacheValueSerializer") GenericJackson2JsonRedisSerializer predictionCacheValueSerializer) {
+            @Qualifier("predictionCacheValueSerializer") Jackson2JsonRedisSerializer<PredictionResponse> predictionCacheValueSerializer) {
         var defaultConfig = RedisCacheConfiguration.defaultCacheConfig()
                 .entryTtl(Duration.ofMinutes(5))
                 .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(redisCacheValueSerializer));

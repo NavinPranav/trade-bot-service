@@ -11,8 +11,9 @@ public class StrategyService {
     private final PredictionService predSvc;
     private final MarketDataService mktSvc;
 
-    public StrategyRecommendation getRecommendation() {
-        var p = predSvc.getLatestPrediction("1D"); var vix = mktSvc.getCurrentVix();
+    public StrategyRecommendation getRecommendation(Long userId) {
+        var p = predSvc.getLatestPrediction("1D", userId);
+        var vix = mktSvc.getCurrentVix();
         boolean highIv = vix.containsKey("vix") && new BigDecimal(vix.get("vix").toString()).compareTo(BigDecimal.valueOf(18))>0;
         boolean highConf = p.getConfidence().compareTo(BigDecimal.valueOf(65))>0;
         var st = selectStrategy(p.getDirection().toBias(), highIv, highConf);

@@ -8,7 +8,6 @@ import com.sensex.optiontrader.integration.angelone.AngelOneMarketDataProvider;
 import com.sensex.optiontrader.integration.angelone.AngelOneWebSocketClient;
 import com.sensex.optiontrader.integration.angelone.LiveTickData;
 import com.sensex.optiontrader.model.dto.response.PredictionResponse;
-import com.sensex.optiontrader.repository.MlServiceConfigRepository;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
@@ -17,6 +16,9 @@ import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -25,17 +27,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Orchestrates the Angel One live market stream and continuous live predictions:
- * <ol>
- *   <li>Authenticates and opens WebSocket on startup</li>
- *   <li>After the first tick, fires a baseline prediction for 1D</li>
- *   <li>On each tick: updates cache, broadcasts price via STOMP, forwards to ML, counts toward next prediction</li>
- *   <li>When the UI subscribes to a horizon (1D/3D/1W/1H), a periodic prediction loop starts:
- *       every {@code livePredictionIntervalMs} the latest OHLCV + live tick are sent to the ML service
- *       and the result is broadcast to {@code /topic/live-predictions}</li>
- *   <li>Horizon changes take effect immediately — the next prediction cycle uses the new horizon</li>
- *   <li>The UI can unsubscribe to stop the prediction loop</li>
- * </ol>
+ * Angel One market stream starts only after at least one authenticated STOMP session connects.
+ * Live prices and predictions are scoped per user (principal name = email) and per-user preferred instrument.
  */
 @Slf4j
 @Service
@@ -50,17 +43,26 @@ public class LiveMarketStreamService {
     private final InstrumentRegistry instrumentRegistry;
     private final AngelOneProperties angelOneProps;
     private final AppProperties appProps;
-    private final MlServiceConfigRepository configRepo;
     private final CacheManager cacheManager;
 
     private final AtomicBoolean reconnecting = new AtomicBoolean(false);
-    private final AtomicBoolean baselineLoaded = new AtomicBoolean(false);
+    private final AtomicBoolean streamStarted = new AtomicBoolean(false);
 
-    /** Number of ticks received since the last live prediction was run. */
-    private final AtomicInteger ticksSinceLastPrediction = new AtomicInteger(0);
+    private record StompSessionInfo(Long userId, String email) {}
 
-    /** The horizon the UI is currently subscribed to (null = no active subscription). */
-    private volatile String activeHorizon = null;
+    private static final class PredictionSubscriber {
+        final String email;
+        volatile String horizon;
+
+        PredictionSubscriber(String email, String horizon) {
+            this.email = email;
+            this.horizon = horizon;
+        }
+    }
+
+    private final ConcurrentHashMap<String, StompSessionInfo> stompSessions = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Long, PredictionSubscriber> predictionSubscribers = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Long, AtomicInteger> tickCounters = new ConcurrentHashMap<>();
 
     private final ScheduledExecutorService streamScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "angel-one-stream");
@@ -68,7 +70,6 @@ public class LiveMarketStreamService {
         return t;
     });
 
-    /** Dedicated scheduler for prediction work so it never blocks the stream/reconnect scheduler. */
     private final ScheduledExecutorService predictionScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "live-prediction");
         t.setDaemon(true);
@@ -86,7 +87,6 @@ public class LiveMarketStreamService {
                                    InstrumentRegistry instrumentRegistry,
                                    AngelOneProperties angelOneProps,
                                    AppProperties appProps,
-                                   MlServiceConfigRepository configRepo,
                                    CacheManager cacheManager) {
         this.authService = authService;
         this.wsClient = wsClient;
@@ -97,92 +97,168 @@ public class LiveMarketStreamService {
         this.instrumentRegistry = instrumentRegistry;
         this.angelOneProps = angelOneProps;
         this.appProps = appProps;
-        this.configRepo = configRepo;
         this.cacheManager = cacheManager;
     }
 
     @PostConstruct
-    void start() {
+    void init() {
         wsClient.addTickListener(this::onTick);
-
-        streamScheduler.execute(() -> {
-            try {
-                authService.login();
-                wsClient.connect();
-                log.info("Angel One live stream started");
-            } catch (Exception e) {
-                log.error("Initial stream connection failed: {} — will retry", e.getMessage());
-                scheduleReconnect();
-            }
-        });
-
         streamScheduler.scheduleWithFixedDelay(this::healthCheck, 30, 30, TimeUnit.SECONDS);
     }
 
     @PreDestroy
     void stop() {
         stopLivePredictionLoop();
+        predictionSubscribers.clear();
+        stompSessions.clear();
+        tickCounters.clear();
         wsClient.disconnect();
         authService.logout();
+        streamStarted.set(false);
         streamScheduler.shutdownNow();
         predictionScheduler.shutdownNow();
         log.info("Angel One live stream stopped");
     }
 
-    // ─── Tick handling ────────────────────────────────────────────────
+    /** Called when a STOMP client subscribes to a user queue (live prices / predictions). */
+    public void registerStompSession(String sessionId, Long userId, String email) {
+        Objects.requireNonNull(sessionId, "sessionId");
+        Objects.requireNonNull(userId, "userId");
+        Objects.requireNonNull(email, "email");
+        stompSessions.put(sessionId, new StompSessionInfo(userId, email));
+        ensureStreamStarted();
+        log.info("STOMP session {} registered for user {}", sessionId, userId);
+    }
 
-    private void onTick(LiveTickData tick) {
-        provider.updateTick(tick);
-        broadcastToFrontend(tick);
-        forwardToMlService(tick);
-        ticksSinceLastPrediction.incrementAndGet();
-
-        if (baselineLoaded.compareAndSet(false, true)) {
-            predictionScheduler.execute(this::loadMlBaseline);
+    /** Called on WebSocket/STOMP disconnect. */
+    public void onStompSessionClosed(String sessionId) {
+        StompSessionInfo removed = stompSessions.remove(sessionId);
+        if (removed == null) {
+            return;
+        }
+        log.info("STOMP session {} closed for user {}", sessionId, removed.userId());
+        if (stompSessions.values().stream().noneMatch(s -> s.userId().equals(removed.userId()))) {
+            unsubscribeLivePredictions(removed.userId());
+        }
+        if (stompSessions.isEmpty()) {
+            shutdownMarketDataPipeline();
         }
     }
 
-    private void loadMlBaseline() {
-        runPrediction("1D");
+    private synchronized void ensureStreamStarted() {
+        if (streamStarted.get()) {
+            return;
+        }
+        streamScheduler.execute(() -> {
+            try {
+                authService.login();
+                instrumentRegistry.refreshStreamingSubscriptions();
+                wsClient.connect();
+                streamStarted.set(true);
+                log.info("Angel One live stream started (first authenticated client)");
+            } catch (Exception e) {
+                streamStarted.set(false);
+                log.error("Angel One stream start failed: {}", e.getMessage());
+                scheduleReconnect();
+            }
+        });
     }
 
-    // ─── Live prediction loop (driven by the UI's active horizon) ─────
+    private synchronized void shutdownMarketDataPipeline() {
+        log.info("No STOMP clients — stopping Angel One stream and prediction loop");
+        stopLivePredictionLoop();
+        predictionSubscribers.clear();
+        tickCounters.clear();
+        wsClient.disconnect();
+        streamStarted.set(false);
+    }
+
+    private void onTick(LiveTickData tick) {
+        provider.updateTick(tick);
+        broadcastToSubscribedUsers(tick);
+        forwardToMlService(tick);
+
+        for (Long userId : predictionSubscribers.keySet()) {
+            instrumentRegistry.getPrimaryForUser(userId).ifPresent(inst -> {
+                if (inst.token().equals(tick.getToken())) {
+                    tickCounters.computeIfAbsent(userId, k -> new AtomicInteger(0)).incrementAndGet();
+                }
+            });
+        }
+    }
+
+    private void broadcastToSubscribedUsers(LiveTickData tick) {
+        try {
+            String name = provider.resolveInstrumentName(tick.getToken());
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("symbol", name);
+            payload.put("token", tick.getToken());
+            payload.put("exchangeType", tick.getExchangeType());
+            payload.put("ltp", tick.getLastTradedPrice());
+            payload.put("open", tick.getOpenPrice());
+            payload.put("high", tick.getHighPrice());
+            payload.put("low", tick.getLowPrice());
+            payload.put("close", tick.getClosePrice());
+            payload.put("change", tick.change());
+            payload.put("changePct", tick.changePct());
+            payload.put("volume", tick.getVolumeTraded());
+            payload.put("timestamp", tick.getExchangeTimestampMs());
+
+            Set<Long> seen = ConcurrentHashMap.newKeySet();
+            for (StompSessionInfo s : stompSessions.values()) {
+                if (!seen.add(s.userId())) {
+                    continue;
+                }
+                instrumentRegistry.getPrimaryForUser(s.userId()).ifPresent(inst -> {
+                    if (inst.token().equals(tick.getToken())) {
+                        notificationService.sendPriceToUser(s.email(), payload);
+                    }
+                });
+            }
+        } catch (Exception e) {
+            log.debug("Failed to broadcast tick: {}", e.getMessage());
+        }
+    }
 
     /**
      * Called when the UI subscribes to (or changes) a prediction horizon.
-     * Triggers an immediate prediction and starts / restarts the periodic loop.
      */
-    public void subscribeLivePredictions(String horizon) {
+    public void subscribeLivePredictions(Long userId, String email, String horizon) {
         String h = normalizeHorizon(horizon);
-        String previous = activeHorizon;
-        activeHorizon = h;
-        ticksSinceLastPrediction.set(0);
+        predictionSubscribers.compute(userId, (k, v) -> {
+            if (v == null) {
+                return new PredictionSubscriber(email, h);
+            }
+            v.horizon = h;
+            return v;
+        });
+        tickCounters.put(userId, new AtomicInteger(0));
 
-        log.info("[LIVE PREDICT] Horizon set to {} (was {})", h, previous);
-
-        predictionScheduler.execute(() -> runPrediction(h));
-        startLivePredictionLoop();
+        log.info("[LIVE PREDICT] user {} horizon {}", userId, h);
+        predictionScheduler.execute(() -> runPrediction(h, userId, email));
+        startLivePredictionLoopIfNeeded();
     }
 
-    /**
-     * Called when the UI no longer needs live predictions (e.g. navigated away).
-     */
-    public void unsubscribeLivePredictions() {
-        log.info("[LIVE PREDICT] Unsubscribed (was {})", activeHorizon);
-        activeHorizon = null;
-        stopLivePredictionLoop();
+    public void unsubscribeLivePredictions(Long userId) {
+        PredictionSubscriber removed = predictionSubscribers.remove(userId);
+        tickCounters.remove(userId);
+        if (removed != null) {
+            log.info("[LIVE PREDICT] user {} unsubscribed (was {})", userId, removed.horizon);
+        }
+        if (predictionSubscribers.isEmpty()) {
+            stopLivePredictionLoop();
+        }
     }
 
-    /**
-     * Returns the currently active horizon, or null if no live prediction loop is running.
-     */
-    public String getActiveHorizon() {
-        return activeHorizon;
+    public void requestPrediction(String horizon, Long userId, String email) {
+        String h = normalizeHorizon(horizon);
+        predictionScheduler.execute(() -> runPrediction(h, userId, email));
     }
 
-    private synchronized void startLivePredictionLoop() {
-        stopLivePredictionLoop();
-
+    private synchronized void startLivePredictionLoopIfNeeded() {
+        if (livePredictionTask != null && !livePredictionTask.isDone()) {
+            return;
+        }
         long intervalMs = appProps.getMlService().getLivePredictionIntervalMs();
         livePredictionTask = predictionScheduler.scheduleWithFixedDelay(
                 this::livePredictionCycle,
@@ -202,49 +278,40 @@ public class LiveMarketStreamService {
         livePredictionTask = null;
     }
 
-    /**
-     * Executed on each scheduled cycle. Skips if no new ticks arrived since the last
-     * prediction (avoids wasting ML resources when the market is idle).
-     */
     private void livePredictionCycle() {
-        String h = activeHorizon;
-        if (h == null) {
+        if (predictionSubscribers.isEmpty()) {
             return;
         }
-        int pending = ticksSinceLastPrediction.getAndSet(0);
-        if (pending == 0) {
-            log.debug("[LIVE PREDICT] No new ticks since last prediction — skipping cycle");
-            return;
+        for (var e : predictionSubscribers.entrySet()) {
+            Long userId = e.getKey();
+            PredictionSubscriber sub = e.getValue();
+            String h = sub.horizon;
+            AtomicInteger cnt = tickCounters.get(userId);
+            if (cnt == null) {
+                continue;
+            }
+            int pending = cnt.getAndSet(0);
+            if (pending > 0) {
+                log.debug("[LIVE PREDICT] {} ticks for user {} horizon {}", pending, userId, h);
+                runPrediction(h, userId, sub.email);
+            }
         }
-        log.debug("[LIVE PREDICT] {} ticks since last prediction — running for horizon {}", pending, h);
-        runPrediction(h);
     }
 
-    // ─── Prediction execution (shared by baseline + live loop) ────────
-
-    /**
-     * Fetches OHLCV + VIX for the given horizon, calls the ML/AI gRPC,
-     * caches the result, and broadcasts to {@code /topic/live-predictions}.
-     */
-    private void runPrediction(String horizon) {
+    private void runPrediction(String horizon, Long userId, String email) {
         OhlcvSpec spec = ohlcvSpecFor(horizon);
-        boolean useAi = isAiEngine();
-        String engine = useAi ? "AI" : "ML";
-
         try {
-            log.info("[PREDICT] [{}] engine={} fetching {} {} OHLCV", horizon, engine, spec.period, spec.interval);
-            var ohlcv = marketDataService.getSensexOhlcv(spec.period, spec.interval);
+            log.info("[PREDICT] user={} [{}] AI fetching {} {} OHLCV", userId, horizon, spec.period, spec.interval);
+            var ohlcv = marketDataService.getOhlcvForUser(userId, spec.period, spec.interval);
             var vix = marketDataService.getIndiaVixHistory();
-            LiveTickData liveTick = latestPrimaryTick();
+            LiveTickData liveTick = latestPrimaryTick(userId);
 
-            var result = useAi
-                    ? mlServiceClient.getGeminiPrediction(horizon, ohlcv, vix, liveTick)
-                    : mlServiceClient.getPrediction(horizon, ohlcv, vix, liveTick);
+            var result = mlServiceClient.getGeminiPrediction(horizon, ohlcv, vix, liveTick, userId);
 
-            updatePredictionCache(horizon, result);
+            updatePredictionCache(horizon, userId, result);
 
             Map<String, Object> payload = new LinkedHashMap<>();
-            payload.put("engine", engine);
+            payload.put("engine", "AI");
             payload.put("horizon", result.getHorizon());
             payload.put("direction", result.getDirection() != null ? result.getDirection().name() : "NEUTRAL");
             payload.put("magnitude", result.getMagnitude());
@@ -252,106 +319,50 @@ public class LiveMarketStreamService {
             payload.put("predictedVolatility", result.getPredictedVolatility());
             payload.put("currentSensex", result.getCurrentSensex());
             payload.put("targetSensex", result.getTargetSensex());
+            payload.put("currentPrice", result.getCurrentPrice());
+            payload.put("targetPrice", result.getTargetPrice());
             payload.put("predictionDate", result.getPredictionDate() != null ? result.getPredictionDate().toString() : "");
-            payload.put("live", activeHorizon != null);
-            notificationService.broadcastPrediction(payload);
-
-            log.info("[PREDICT] [{}] {} {} conf={}% mag={}%",
-                    horizon, engine, result.getDirection(), result.getConfidence(), result.getMagnitude());
-        } catch (Exception e) {
-            log.warn("Prediction [{}] failed: {}", horizon, e.getMessage());
-        }
-    }
-
-    /**
-     * Legacy entry point kept for backward compatibility — triggers a one-shot
-     * prediction without starting the live loop.
-     */
-    public void requestPrediction(String horizon) {
-        String h = normalizeHorizon(horizon);
-        predictionScheduler.execute(() -> runPrediction(h));
-    }
-
-    // ─── Helpers ──────────────────────────────────────────────────────
-
-    private static String normalizeHorizon(String horizon) {
-        return (horizon == null || horizon.isBlank()) ? "1D" : horizon.trim().toUpperCase();
-    }
-
-    private void updatePredictionCache(String horizon, PredictionResponse result) {
-        try {
-            var cache = cacheManager.getCache("predictions");
-            if (cache != null) {
-                cache.put("v5-" + horizon, result);
+            if (result.getAiQuotaNotice() != null && !result.getAiQuotaNotice().isBlank()) {
+                payload.put("aiQuotaNotice", result.getAiQuotaNotice());
             }
+            payload.put("live", predictionSubscribers.containsKey(userId));
+            notificationService.sendPredictionToUser(email, payload);
+
+            log.info("[PREDICT] user={} [{}] AI {} conf={}% mag={}%",
+                    userId, horizon, result.getDirection(), result.getConfidence(), result.getMagnitude());
         } catch (Exception e) {
-            log.debug("Failed to update prediction cache: {}", e.getMessage());
+            log.warn("Prediction user={} [{}] failed: {}", userId, horizon, e.getMessage());
         }
     }
 
-    private record OhlcvSpec(String period, String interval) {}
-
-    private static OhlcvSpec ohlcvSpecFor(String horizon) {
-        return switch (horizon) {
-            case "1H" -> new OhlcvSpec("1M", "5M");
-            case "3D" -> new OhlcvSpec("1Y", "1D");
-            case "1W" -> new OhlcvSpec("2Y", "1D");
-            default   -> new OhlcvSpec("1Y", "1D");
-        };
-    }
-
-    private boolean isAiEngine() {
-        return configRepo.findByConfigKey("prediction_engine")
-                .map(c -> "AI".equalsIgnoreCase(c.getConfigValue()))
-                .orElse(false);
-    }
-
-    /**
-     * Called by InstrumentService after the active instrument is changed.
-     * Resubscribes the WebSocket to the new instruments without reconnecting.
-     */
     public void onInstrumentSwitch() {
-        log.info("Active instrument changed — resubscribing WebSocket");
+        log.info("Preferred instrument changed — resubscribing Angel One");
         streamScheduler.execute(() -> {
             try {
-                wsClient.resubscribe();
+                instrumentRegistry.refreshStreamingSubscriptions();
+                if (wsClient.isConnected()) {
+                    wsClient.resubscribe();
+                }
             } catch (Exception e) {
-                log.warn("Resubscribe failed, scheduling full reconnect: {}", e.getMessage());
+                log.warn("Resubscribe failed, scheduling reconnect: {}", e.getMessage());
                 scheduleReconnect();
             }
         });
     }
 
-    private LiveTickData latestPrimaryTick() {
-        return instrumentRegistry.getPrimary()
+    private LiveTickData latestPrimaryTick(Long userId) {
+        return instrumentRegistry.getPrimaryForUser(userId)
                 .map(i -> provider.getLatestTick(i.token()))
                 .orElse(null);
     }
 
-    private void broadcastToFrontend(LiveTickData tick) {
-        try {
-            String name = provider.resolveInstrumentName(tick.getToken());
-            Map<String, Object> payload = new LinkedHashMap<>();
-            payload.put("symbol", name);
-            payload.put("token", tick.getToken());
-            payload.put("exchangeType", tick.getExchangeType());
-            payload.put("ltp", tick.getLastTradedPrice());
-            payload.put("open", tick.getOpenPrice());
-            payload.put("high", tick.getHighPrice());
-            payload.put("low", tick.getLowPrice());
-            payload.put("close", tick.getClosePrice());
-            payload.put("change", tick.change());
-            payload.put("changePct", tick.changePct());
-            payload.put("volume", tick.getVolumeTraded());
-            payload.put("timestamp", tick.getExchangeTimestampMs());
-            notificationService.broadcastPrice(payload);
-        } catch (Exception e) {
-            log.debug("Failed to broadcast tick: {}", e.getMessage());
-        }
-    }
-
     private void forwardToMlService(LiveTickData tick) {
         try {
+            if (instrumentRegistry.findByName("INDIA VIX")
+                    .map(v -> v.token().equals(tick.getToken()))
+                    .orElse(false)) {
+                return;
+            }
             String name = provider.resolveInstrumentName(tick.getToken());
             mlServiceClient.sendLiveTick(
                     name,
@@ -372,9 +383,38 @@ public class LiveMarketStreamService {
         }
     }
 
-    // ─── Reconnection ─────────────────────────────────────────────────
+    private void updatePredictionCache(String horizon, Long userId, PredictionResponse result) {
+        try {
+            var cache = cacheManager.getCache("predictions");
+            if (cache != null) {
+                cache.put(
+                        "v8-AI-" + horizon + "-u" + userId + "-tok" + instrumentRegistry.primaryTokenOrNone(userId),
+                        result);
+            }
+        } catch (Exception e) {
+            log.debug("Failed to update prediction cache: {}", e.getMessage());
+        }
+    }
+
+    private static String normalizeHorizon(String horizon) {
+        return (horizon == null || horizon.isBlank()) ? "1D" : horizon.trim().toUpperCase();
+    }
+
+    private record OhlcvSpec(String period, String interval) {}
+
+    private static OhlcvSpec ohlcvSpecFor(String horizon) {
+        return switch (horizon) {
+            case "1H" -> new OhlcvSpec("1M", "5M");
+            case "3D" -> new OhlcvSpec("6M", "1D");
+            case "1W" -> new OhlcvSpec("2Y", "1D");
+            default -> new OhlcvSpec("1Y", "1D");
+        };
+    }
 
     private void healthCheck() {
+        if (!streamStarted.get()) {
+            return;
+        }
         if (!wsClient.isConnected()) {
             log.warn("Angel One WebSocket disconnected — scheduling reconnect");
             scheduleReconnect();
@@ -391,9 +431,10 @@ public class LiveMarketStreamService {
                 if (!authService.isAuthenticated()) {
                     authService.login();
                 }
+                instrumentRegistry.refreshStreamingSubscriptions();
                 wsClient.connect();
+                streamStarted.set(true);
                 reconnecting.set(false);
-                baselineLoaded.set(false);
                 log.info("Angel One WebSocket reconnected");
             } catch (Exception e) {
                 reconnecting.set(false);

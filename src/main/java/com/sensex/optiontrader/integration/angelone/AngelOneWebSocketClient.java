@@ -32,32 +32,39 @@ import java.util.function.Consumer;
  * Connects with feed-token authentication, subscribes to instruments in Quote mode,
  * and parses the proprietary binary frames into {@link LiveTickData} events.
  * <p>
- * Binary frame layout per instrument (Quote mode = 91 bytes):
+ * Binary layout matches Angel {@code smartWebSocketV2.py} (int64 prices in paise, /100 → rupees):
  * <pre>
- *   [0]       subscription_mode   uint8
+ *   [0]       subscription_mode   uint8   (1=LTP, 2=Quote, 3=SnapQuote, 4=Depth)
  *   [1]       exchange_type       uint8
- *   [2-26]    token               char[25]  (null-padded)
+ *   [2-26]    token               char[25]
  *   [27-34]   sequence_number     int64 LE
  *   [35-42]   exchange_timestamp  int64 LE  (epoch ms)
- *   [43-46]   ltp                 int32 LE  (/100)
- *   --- Quote extras (mode >= 2) ---
- *   [47-50]   last_traded_qty     int32 LE
- *   [51-54]   avg_traded_price    int32 LE  (/100)
- *   [55-58]   volume_traded       int32 LE
- *   [59-66]   total_buy_qty       double LE
- *   [67-74]   total_sell_qty      double LE
- *   [75-78]   open                int32 LE  (/100)
- *   [79-82]   high                int32 LE  (/100)
- *   [83-86]   low                 int32 LE  (/100)
- *   [87-90]   close               int32 LE  (/100)
+ *   [43-50]   last_traded_price   int64 LE  (paise → /100 for rupees)
+ *   --- Modes 2 & 3 only (Quote / SnapQuote) ---
+ *   [51-58]   last_traded_qty     int64 LE
+ *   [59-66]   average_traded_price int64 LE (paise → /100)
+ *   [67-74]   volume_for_day      int64 LE
+ *   [75-82]   total_buy_qty       double LE
+ *   [83-90]   total_sell_qty      double LE
+ *   [91-98]   open                int64 LE (/100)
+ *   ... high, low, close int64 each → wire ends at byte 123 for mode 2
+ *   --- Mode 3 extra (SnapQuote total 379 bytes) ---
+ *   timestamps, OI, best-5 book, circuits, 52w — see Angel Python parser bytes 123-378
  * </pre>
  */
 @Slf4j
 @Component
 public class AngelOneWebSocketClient {
 
-    private static final int LTP_PACKET_SIZE = 47;
-    private static final int QUOTE_PACKET_SIZE = 91;
+    /** Mode 1: LTP only (official SmartAPI v2). */
+    private static final int WIRE_LTP = 51;
+    /** Mode 2: Quote (OHLC + volume + LTP). */
+    private static final int WIRE_QUOTE = 123;
+    /** Mode 3: Snap quote (includes best-5 and circuits; must consume full packet to stay aligned). */
+    private static final int WIRE_SNAP_QUOTE = 379;
+    /** Mode 4: 20-depth packet (approx; depth-only subscriptions). */
+    private static final int WIRE_DEPTH = 443;
+    private static final int HEADER_LEN = 43;
     private static final int TOKEN_FIELD_LEN = 25;
 
     private final AngelOneProperties props;
@@ -276,10 +283,15 @@ public class AngelOneWebSocketClient {
 
         combined.order(ByteOrder.LITTLE_ENDIAN);
 
-        while (combined.remaining() >= LTP_PACKET_SIZE) {
-            int mode = Byte.toUnsignedInt(combined.get(combined.position()));
-            int requiredSize = mode >= 2 ? QUOTE_PACKET_SIZE : LTP_PACKET_SIZE;
-
+        while (combined.remaining() >= HEADER_LEN) {
+            int subscriptionMode = Byte.toUnsignedInt(combined.get(combined.position()));
+            int requiredSize = wireSizeForSubscriptionMode(subscriptionMode);
+            if (requiredSize < 0) {
+                if (combined.hasRemaining()) {
+                    combined.get();
+                }
+                continue;
+            }
             if (combined.remaining() < requiredSize) {
                 break;
             }
@@ -289,7 +301,7 @@ public class AngelOneWebSocketClient {
             combined.position(combined.position() + requiredSize);
 
             try {
-                LiveTickData tick = parsePacket(packet, mode);
+                LiveTickData tick = parsePacket(packet);
                 if (tick != null) {
                     dispatch(tick);
                 }
@@ -307,8 +319,28 @@ public class AngelOneWebSocketClient {
         }
     }
 
-    private LiveTickData parsePacket(ByteBuffer buf, int mode) {
+    /**
+     * Full on-wire packet length for one tick, per Angel SmartAPI binary v2
+     * (see {@code SmartWebSocketV2._parse_binary_data} in smartapi-python).
+     */
+    private static int wireSizeForSubscriptionMode(int subscriptionMode) {
+        return switch (subscriptionMode) {
+            case 1 -> WIRE_LTP;
+            case 2 -> WIRE_QUOTE;
+            case 3 -> WIRE_SNAP_QUOTE;
+            case 4 -> WIRE_DEPTH;
+            default -> -1;
+        };
+    }
+
+    private LiveTickData parsePacket(ByteBuffer buf) {
         int subscriptionMode = Byte.toUnsignedInt(buf.get());
+        if (subscriptionMode == 4) {
+            // Depth packets use a different layout; skip without emitting a bogus tick.
+            buf.position(buf.limit());
+            return null;
+        }
+
         int exchangeType = Byte.toUnsignedInt(buf.get());
 
         byte[] tokenBytes = new byte[TOKEN_FIELD_LEN];
@@ -317,7 +349,7 @@ public class AngelOneWebSocketClient {
 
         long seqNum = buf.getLong();
         long exchangeTs = buf.getLong();
-        double ltp = buf.getInt() / 100.0;
+        double ltp = buf.getLong() / 100.0;
 
         var builder = LiveTickData.builder()
                 .subscriptionMode(subscriptionMode)
@@ -327,19 +359,45 @@ public class AngelOneWebSocketClient {
                 .exchangeTimestampMs(exchangeTs)
                 .lastTradedPrice(ltp);
 
-        if (mode >= 2 && buf.remaining() >= (QUOTE_PACKET_SIZE - LTP_PACKET_SIZE)) {
-            builder.lastTradedQuantity(buf.getInt())
-                    .averageTradedPrice(buf.getInt() / 100.0)
-                    .volumeTraded(Integer.toUnsignedLong(buf.getInt()))
-                    .totalBuyQuantity(buf.getDouble())
-                    .totalSellQuantity(buf.getDouble())
-                    .openPrice(buf.getInt() / 100.0)
-                    .highPrice(buf.getInt() / 100.0)
-                    .lowPrice(buf.getInt() / 100.0)
-                    .closePrice(buf.getInt() / 100.0);
+        if (subscriptionMode == 2 || subscriptionMode == 3) {
+            long ltq = buf.getLong();
+            long avgPaise = buf.getLong();
+            long vol = buf.getLong();
+            double buy = buf.getDouble();
+            double sell = buf.getDouble();
+            double open = buf.getLong() / 100.0;
+            double high = buf.getLong() / 100.0;
+            double low = buf.getLong() / 100.0;
+            double close = buf.getLong() / 100.0;
+            builder.lastTradedQuantity(safeIntFromLong(ltq))
+                    .averageTradedPrice(avgPaise / 100.0)
+                    .volumeTraded(vol)
+                    .totalBuyQuantity(buy)
+                    .totalSellQuantity(sell)
+                    .openPrice(open)
+                    .highPrice(high)
+                    .lowPrice(low)
+                    .closePrice(close);
+        }
+
+        if (subscriptionMode == 3) {
+            int skip = WIRE_SNAP_QUOTE - buf.position();
+            if (skip > 0 && buf.remaining() >= skip) {
+                buf.position(buf.position() + skip);
+            }
         }
 
         return builder.build();
+    }
+
+    private static int safeIntFromLong(long v) {
+        if (v > Integer.MAX_VALUE) {
+            return Integer.MAX_VALUE;
+        }
+        if (v < Integer.MIN_VALUE) {
+            return Integer.MIN_VALUE;
+        }
+        return (int) v;
     }
 
     private void dispatch(LiveTickData tick) {

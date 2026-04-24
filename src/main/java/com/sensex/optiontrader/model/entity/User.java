@@ -14,6 +14,11 @@ public class User {
     @Column(nullable=false) private String password;
     @Column(nullable=false) private String name;
     @Enumerated(EnumType.STRING) @Column(nullable=false) @Builder.Default private UserRole role = UserRole.USER;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "preferred_instrument_id", nullable = false)
+    private Instrument preferredInstrument;
+
     @CreationTimestamp private LocalDateTime createdAt;
     @UpdateTimestamp private LocalDateTime updatedAt;
 }

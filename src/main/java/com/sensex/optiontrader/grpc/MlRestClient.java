@@ -58,15 +58,20 @@ public class MlRestClient {
             String horizon,
             List<Map<String, Object>> sensexOhlcv,
             List<Map<String, Object>> indiaVixHistory,
-            LiveTickData liveTick) {
+            LiveTickData liveTick,
+            Long userId) {
 
         if (restClient == null) {
             throw new MlServiceUnavailableException(
                     "ML HTTP URL not configured (set ML_SERVICE_HTTP_URL)", null);
         }
 
-        String underlying = instrumentRegistry.getPrimary()
+        var primary = instrumentRegistry.getPrimaryForUser(userId);
+        String underlying = primary
                 .map(com.sensex.optiontrader.config.AngelOneProperties.InstrumentToken::name)
+                .orElse("");
+        String instrumentToken = primary
+                .map(com.sensex.optiontrader.config.AngelOneProperties.InstrumentToken::token)
                 .orElse("");
 
         Map<String, Object> body = new LinkedHashMap<>();
@@ -75,6 +80,7 @@ public class MlRestClient {
         body.put("india_vix", toVixPointList(indiaVixHistory));
         body.put("sensex_quote", buildQuote(sensexOhlcv, liveTick));
         body.put("underlying_symbol", underlying);
+        body.put("instrument_token", instrumentToken);
         body.put("engine", engine != null ? engine : "AI");
 
         try {
@@ -173,6 +179,8 @@ public class MlRestClient {
         } catch (Exception e) {
             date = LocalDate.now();
         }
+        Object qn = r.get("ai_quota_notice");
+        String quota = qn != null && !qn.toString().isBlank() ? qn.toString().trim() : null;
         return PredictionResponse.builder()
                 .predictionDate(date)
                 .horizon(String.valueOf(r.getOrDefault("horizon", "")))
@@ -182,6 +190,7 @@ public class MlRestClient {
                 .predictedVolatility(toBigDecimal(r.get("predicted_volatility")))
                 .currentSensex(toBigDecimal(r.get("current_sensex")))
                 .targetSensex(toBigDecimal(r.get("target_sensex")))
+                .aiQuotaNotice(quota)
                 .build();
     }
 

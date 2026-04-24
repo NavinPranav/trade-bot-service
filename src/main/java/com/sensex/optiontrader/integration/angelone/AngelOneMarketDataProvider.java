@@ -1,5 +1,6 @@
 package com.sensex.optiontrader.integration.angelone;
 
+import com.sensex.optiontrader.config.AngelOneProperties.InstrumentToken;
 import com.sensex.optiontrader.integration.MarketDataProvider;
 import com.sensex.optiontrader.service.InstrumentRegistry;
 import lombok.RequiredArgsConstructor;
@@ -34,8 +35,8 @@ public class AngelOneMarketDataProvider implements MarketDataProvider {
     }
 
     @Override
-    public List<Map<String, Object>> getOhlcv(LocalDateTime start, LocalDateTime end, String interval) {
-        return historicalClient.getOhlcv(start, end, interval);
+    public List<Map<String, Object>> getOhlcv(InstrumentToken instrument, LocalDateTime start, LocalDateTime end, String interval) {
+        return historicalClient.getOhlcv(instrument, start, end, interval);
     }
 
     @Override

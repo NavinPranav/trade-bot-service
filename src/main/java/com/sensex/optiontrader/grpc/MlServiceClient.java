@@ -72,7 +72,7 @@ public class MlServiceClient {
             List<Map<String, Object>> sensexOhlcv,
             List<Map<String, Object>> indiaVixHistory,
             com.sensex.optiontrader.integration.angelone.LiveTickData liveTick) {
-        return callPrediction("ML", horizon, sensexOhlcv, indiaVixHistory, liveTick);
+        return callPrediction("ML", horizon, sensexOhlcv, indiaVixHistory, liveTick, null);
     }
 
     /**
@@ -82,8 +82,9 @@ public class MlServiceClient {
             String horizon,
             List<Map<String, Object>> sensexOhlcv,
             List<Map<String, Object>> indiaVixHistory,
-            com.sensex.optiontrader.integration.angelone.LiveTickData liveTick) {
-        return callPrediction("AI", horizon, sensexOhlcv, indiaVixHistory, liveTick);
+            com.sensex.optiontrader.integration.angelone.LiveTickData liveTick,
+            Long userId) {
+        return callPrediction("AI", horizon, sensexOhlcv, indiaVixHistory, liveTick, userId);
     }
 
     private PredictionResponse callPrediction(
@@ -91,15 +92,17 @@ public class MlServiceClient {
             String horizon,
             List<Map<String, Object>> sensexOhlcv,
             List<Map<String, Object>> indiaVixHistory,
-            com.sensex.optiontrader.integration.angelone.LiveTickData liveTick) {
+            com.sensex.optiontrader.integration.angelone.LiveTickData liveTick,
+            Long userId) {
         sensexOhlcv = normalizeListOfMaps(sensexOhlcv, "sensex_ohlcv");
         indiaVixHistory = normalizeListOfMaps(indiaVixHistory, "india_vix");
 
         var stub = PredictionServiceGrpc.newBlockingStub(mlServiceChannel)
                 .withDeadlineAfter(props.getMlService().getTimeoutMs(), TimeUnit.MILLISECONDS);
 
-        String underlying = primaryInstrumentName();
+        String underlying = primaryInstrumentName(userId);
         var req = PredictionRequest.newBuilder().setHorizon(horizon == null ? "" : horizon).setUnderlyingSymbol(underlying);
+        instrumentRegistry.getPrimaryForUser(userId).ifPresent(inst -> req.setInstrumentToken(inst.token()));
         for (Map<String, Object> row : sensexOhlcv) {
             OhlcvBar bar = toOhlcvBar(row);
             if (bar != null) {
@@ -414,8 +417,8 @@ public class MlServiceClient {
         }
     }
 
-    private String primaryInstrumentName() {
-        return instrumentRegistry.getPrimary()
+    private String primaryInstrumentName(Long userId) {
+        return instrumentRegistry.getPrimaryForUser(userId)
                 .map(com.sensex.optiontrader.config.AngelOneProperties.InstrumentToken::name)
                 .orElse("");
     }
@@ -427,6 +430,7 @@ public class MlServiceClient {
         } catch (Exception e) {
             date = LocalDate.now();
         }
+        String quota = p.getAiQuotaNotice();
         return PredictionResponse.builder()
                 .predictionDate(date)
                 .horizon(p.getHorizon())
@@ -436,6 +440,7 @@ public class MlServiceClient {
                 .predictedVolatility(BigDecimal.valueOf(p.getPredictedVolatility()))
                 .currentSensex(p.getCurrentSensex() != 0 ? BigDecimal.valueOf(p.getCurrentSensex()) : null)
                 .targetSensex(p.getTargetSensex() != 0 ? BigDecimal.valueOf(p.getTargetSensex()) : null)
+                .aiQuotaNotice(quota != null && !quota.isBlank() ? quota : null)
                 .build();
     }
 

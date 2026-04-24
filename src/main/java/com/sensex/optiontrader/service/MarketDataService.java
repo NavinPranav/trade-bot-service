@@ -3,6 +3,7 @@ package com.sensex.optiontrader.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sensex.optiontrader.integration.MarketDataProvider;
+import com.sensex.optiontrader.integration.angelone.AngelOneHistoricalClient;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
@@ -19,11 +20,13 @@ import java.util.Map;
 public class MarketDataService {
     private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
     private final MarketDataProvider marketData;
+    private final AngelOneHistoricalClient historicalClient;
+    private final InstrumentRegistry instrumentRegistry;
     private final ObjectMapper objectMapper;
 
-    /** Bump version when Redis value shape changes (avoids ClassCastException on stale entries). */
-    @Cacheable(value = "marketData", key = "'v4-sensex-'+#period+'-'+#interval", unless = "#result.isEmpty()")
-    public List<Map<String, Object>> getSensexOhlcv(String period, String interval) {
+    /** OHLCV for the authenticated user's preferred underlying (cache key includes user + instrument). */
+    @Cacheable(value = "marketData", key = "'v5-u'+#userId+'-'+#period+'-'+#interval", unless = "#result.isEmpty()")
+    public List<Map<String, Object>> getOhlcvForUser(Long userId, String period, String interval) {
         var end = LocalDateTime.now(IST);
         var start = switch (period) {
             case "1M" -> end.minusMonths(1);
@@ -32,7 +35,11 @@ public class MarketDataService {
             case "5Y" -> end.minusYears(5);
             default -> end.minusYears(1);
         };
-        return marketData.getOhlcv(start, end, interval);
+        var inst = instrumentRegistry.getPrimaryForUser(userId).orElse(null);
+        if (inst == null) {
+            return List.of();
+        }
+        return historicalClient.getOhlcv(inst, start, end, interval);
     }
 
     @Cacheable(value = "marketData", key = "'v4-vix'", unless = "!#result.containsKey('timestamp')")

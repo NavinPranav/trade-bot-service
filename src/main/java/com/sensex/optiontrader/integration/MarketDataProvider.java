@@ -1,5 +1,6 @@
 package com.sensex.optiontrader.integration;
 
+import com.sensex.optiontrader.config.AngelOneProperties.InstrumentToken;
 import com.sensex.optiontrader.integration.angelone.LiveTickData;
 
 import java.time.LocalDateTime;
@@ -14,7 +15,7 @@ public interface MarketDataProvider {
 
     String id();
 
-    List<Map<String, Object>> getOhlcv(LocalDateTime start, LocalDateTime end, String interval);
+    List<Map<String, Object>> getOhlcv(InstrumentToken instrument, LocalDateTime start, LocalDateTime end, String interval);
 
     Map<String, Object> getVolatilityIndexSnapshot();
 

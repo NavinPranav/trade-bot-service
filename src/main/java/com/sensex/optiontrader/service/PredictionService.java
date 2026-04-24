@@ -6,7 +6,6 @@ import com.sensex.optiontrader.grpc.MlServiceClient;
 import com.sensex.optiontrader.integration.MarketDataProvider;
 import com.sensex.optiontrader.integration.angelone.LiveTickData;
 import com.sensex.optiontrader.model.dto.response.PredictionResponse;
-import com.sensex.optiontrader.repository.MlServiceConfigRepository;
 import com.sensex.optiontrader.repository.PredictionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -14,7 +13,9 @@ import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
-import java.util.*;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -27,7 +28,6 @@ public class PredictionService {
     private final MarketDataService marketData;
     private final MarketDataProvider marketDataProvider;
     private final InstrumentRegistry instrumentRegistry;
-    private final MlServiceConfigRepository configRepo;
 
     private record HorizonSpec(String period, String interval) {}
 
@@ -36,42 +36,38 @@ public class PredictionService {
         String h = horizon == null ? "1D" : horizon.trim().toUpperCase();
         return switch (h) {
             case "1D" -> new HorizonSpec("1Y", "1D");
-            case "3D" -> new HorizonSpec("1Y", "1D");
+            case "3D" -> new HorizonSpec("6M", "1D");
             case "1W" -> new HorizonSpec("2Y", "1D");
             case "1H" -> new HorizonSpec("1M", "5M");
             default -> new HorizonSpec("1Y", "1D");
         };
     }
 
-    @Cacheable(value = "predictions", key = "'v5-'+#horizon")
-    public PredictionResponse getLatestPrediction(String horizon) {
+    /** AI (Gemini) prediction only; scoped per user and preferred instrument. */
+    @Cacheable(
+            value = "predictions",
+            key = "'v8-AI-'+#horizon+'-u'+#userId+'-tok'+@instrumentRegistry.primaryTokenOrNone(#userId)"
+    )
+    public PredictionResponse getLatestPrediction(String horizon, Long userId) {
         HorizonSpec spec = horizonSpec(horizon);
-        var ohlcv = marketData.getSensexOhlcv(spec.period(), spec.interval());
+        var ohlcv = marketData.getOhlcvForUser(userId, spec.period(), spec.interval());
         var indiaVixHistory = marketData.getIndiaVixHistory();
-        LiveTickData liveTick = latestPrimaryTick();
-        String engine = isAiEngine() ? "AI" : "ML";
+        LiveTickData liveTick = latestPrimaryTick(userId);
 
-        // 1) Try gRPC
         try {
-            if ("AI".equals(engine)) {
-                log.debug("prediction_engine=AI → routing to GetGeminiPrediction (gRPC)");
-                return ml.getGeminiPrediction(horizon, ohlcv, indiaVixHistory, liveTick);
-            }
-            return ml.getPrediction(horizon, ohlcv, indiaVixHistory, liveTick);
+            log.debug("prediction=AI (Gemini) userId={} horizon={}", userId, horizon);
+            return ml.getGeminiPrediction(horizon, ohlcv, indiaVixHistory, liveTick, userId);
         } catch (Exception grpcErr) {
             log.warn("gRPC prediction failed, trying HTTP REST fallback: {}", grpcErr.getMessage());
 
-            // 2) Try HTTP REST fallback
             if (mlRest.isConfigured()) {
                 try {
-                    log.debug("prediction_engine={} → routing to REST /predict", engine);
-                    return mlRest.predict(engine, horizon, ohlcv, indiaVixHistory, liveTick);
+                    return mlRest.predict("AI", horizon, ohlcv, indiaVixHistory, liveTick, userId);
                 } catch (Exception restErr) {
                     log.warn("HTTP REST prediction also failed: {}", restErr.getMessage());
                 }
             }
 
-            // 3) Try DB fallback
             var dbFallback = repo.findTopByHorizonOrderByPredictionDateDesc(horizon);
             if (dbFallback.isPresent()) {
                 var p = dbFallback.get();
@@ -87,13 +83,6 @@ public class PredictionService {
             throw new MlServiceUnavailableException(
                     "ML service unreachable and no cached predictions for horizon: " + horizon, grpcErr);
         }
-    }
-
-    /** Returns true when the ml_service_config table has prediction_engine=AI. */
-    public boolean isAiEngine() {
-        return configRepo.findByConfigKey("prediction_engine")
-                .map(c -> "AI".equalsIgnoreCase(c.getConfigValue()))
-                .orElse(false);
     }
 
     public List<PredictionResponse> getPredictionHistory(int days, String horizon) {
@@ -120,8 +109,8 @@ public class PredictionService {
         return m;
     }
 
-    private LiveTickData latestPrimaryTick() {
-        return instrumentRegistry.getPrimary()
+    private LiveTickData latestPrimaryTick(Long userId) {
+        return instrumentRegistry.getPrimaryForUser(userId)
                 .map(i -> marketDataProvider.getLatestTick(i.token()))
                 .orElse(null);
     }

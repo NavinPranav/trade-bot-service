@@ -15,7 +15,7 @@ public class AppProperties {
 
     @Data public static class Jwt { private String secret; private long accessTokenExpiryMs; private long refreshTokenExpiryMs; }
     /** gRPC address for the ML server ({@code host} + gRPC listen port, e.g. 50051 — not HTTP 8000). */
-    @Data public static class MlService { private String host; private int port; private boolean tls; private long timeoutMs; private long backtestTimeoutMs; private long livePredictionIntervalMs = 15000; private String httpUrl = ""; }
+    @Data public static class MlService { private String host; private int port; private boolean tls; private long timeoutMs; private long backtestTimeoutMs; private long livePredictionIntervalMs = 60000; private String httpUrl = ""; }
     @Data public static class Market { private String tradingHoursStart; private String tradingHoursEnd; private String timezone; }
     @Data public static class Cache { private long predictionTtl; private long optionsChainTtl; private long marketDataTtl; }
 }
