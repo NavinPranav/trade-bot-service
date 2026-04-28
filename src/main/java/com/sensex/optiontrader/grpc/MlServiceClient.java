@@ -423,27 +423,71 @@ public class MlServiceClient {
                 .orElse("");
     }
 
-    private static PredictionResponse fromProto(com.sensex.optiontrader.grpc.proto.PredictionResponse p) {
+    private static final String LEVELS_MARKER = "\n\n[TRADING_LEVELS]";
+
+    private PredictionResponse fromProto(com.sensex.optiontrader.grpc.proto.PredictionResponse p) {
         LocalDate date;
         try {
             date = p.getPredictionDate().isBlank() ? LocalDate.now() : LocalDate.parse(p.getPredictionDate());
         } catch (Exception e) {
             date = LocalDate.now();
         }
+
+        // Split prediction_reason into display text + embedded trading levels JSON
+        String rawReason = p.getPredictionReason() != null ? p.getPredictionReason() : "";
+        String displayReason = rawReason;
+        BigDecimal entryPrice = null, stopLoss = null, riskReward = null, targetPrice = null;
+        Integer validMinutes = null;
+
+        int levelsIdx = rawReason.indexOf(LEVELS_MARKER);
+        if (levelsIdx >= 0) {
+            displayReason = rawReason.substring(0, levelsIdx).trim();
+            String levelsJson = rawReason.substring(levelsIdx + LEVELS_MARKER.length()).trim();
+            try {
+                @SuppressWarnings("unchecked")
+                java.util.Map<String, Object> levels =
+                        objectMapper.readValue(levelsJson, new TypeReference<java.util.Map<String, Object>>() {});
+                entryPrice = levelsToBd(levels.get("entry_price"));
+                stopLoss = levelsToBd(levels.get("stop_loss"));
+                targetPrice = levelsToBd(levels.get("target_price"));
+                riskReward = levelsToBd(levels.get("risk_reward"));
+                Object vm = levels.get("valid_minutes");
+                if (vm instanceof Number n) validMinutes = n.intValue();
+            } catch (Exception e) {
+                log.debug("Could not parse trading levels JSON: {}", e.getMessage());
+            }
+        }
+
+        double confidence = p.getConfidence();
+        boolean noTradeZone = confidence < 65.0;
+
         String quota = p.getAiQuotaNotice();
-        String reason = p.getPredictionReason();
         return PredictionResponse.builder()
                 .predictionDate(date)
                 .horizon(p.getHorizon())
                 .direction(parseDirection(p.getDirection()))
                 .magnitude(BigDecimal.valueOf(p.getMagnitude()))
-                .confidence(BigDecimal.valueOf(p.getConfidence()))
+                .confidence(BigDecimal.valueOf(confidence))
                 .predictedVolatility(BigDecimal.valueOf(p.getPredictedVolatility()))
                 .currentSensex(p.getCurrentSensex() != 0 ? BigDecimal.valueOf(p.getCurrentSensex()) : null)
                 .targetSensex(p.getTargetSensex() != 0 ? BigDecimal.valueOf(p.getTargetSensex()) : null)
+                .entryPrice(entryPrice)
+                .stopLoss(stopLoss)
+                .targetPrice(targetPrice)
+                .riskReward(riskReward)
+                .validMinutes(validMinutes)
+                .predictionTimestampMs(System.currentTimeMillis())
+                .noTradeZone(noTradeZone)
                 .aiQuotaNotice(quota != null && !quota.isBlank() ? quota : null)
-                .predictionReason(reason != null && !reason.isBlank() ? reason : null)
+                .predictionReason(displayReason.isBlank() ? null : displayReason)
                 .build();
+    }
+
+    private static BigDecimal levelsToBd(Object x) {
+        if (x == null) return null;
+        if (x instanceof BigDecimal b) return b;
+        if (x instanceof Number n) return BigDecimal.valueOf(n.doubleValue());
+        try { return new BigDecimal(String.valueOf(x).trim()); } catch (Exception e) { return null; }
     }
 
     private static Direction parseDirection(String s) {

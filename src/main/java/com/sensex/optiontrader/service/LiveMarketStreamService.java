@@ -14,6 +14,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.CacheManager;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -282,6 +284,10 @@ public class LiveMarketStreamService {
         if (predictionSubscribers.isEmpty()) {
             return;
         }
+        if (!isWithinTradingHours()) {
+            log.debug("[LIVE PREDICT] Market closed — skipping prediction cycle");
+            return;
+        }
         for (var e : predictionSubscribers.entrySet()) {
             Long userId = e.getKey();
             PredictionSubscriber sub = e.getValue();
@@ -296,6 +302,27 @@ public class LiveMarketStreamService {
                 runPrediction(h, userId, sub.email);
             }
         }
+    }
+
+    private static final ZoneId IST_ZONE = ZoneId.of("Asia/Kolkata");
+    private static final LocalTime MARKET_OPEN  = LocalTime.of(9, 15);
+    private static final LocalTime MARKET_CLOSE = LocalTime.of(15, 30);
+    private static final LocalTime SQUAREOFF_WARN = LocalTime.of(15, 0);
+
+    private boolean isWithinTradingHours() {
+        LocalTime now = LocalTime.now(IST_ZONE);
+        return !now.isBefore(MARKET_OPEN) && now.isBefore(MARKET_CLOSE);
+    }
+
+    private boolean isApproachingSquareOff() {
+        LocalTime now = LocalTime.now(IST_ZONE);
+        return !now.isBefore(SQUAREOFF_WARN) && now.isBefore(MARKET_CLOSE);
+    }
+
+    /** Minutes remaining until market close (negative if already past close). */
+    private int minutesToClose() {
+        LocalTime now = LocalTime.now(IST_ZONE);
+        return (int) java.time.Duration.between(now, MARKET_CLOSE).toMinutes();
     }
 
     private void runPrediction(String horizon, Long userId, String email) {
@@ -313,7 +340,7 @@ public class LiveMarketStreamService {
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("engine", "AI");
             payload.put("horizon", result.getHorizon());
-            payload.put("direction", result.getDirection() != null ? result.getDirection().name() : "NEUTRAL");
+            payload.put("direction", result.getDirection() != null ? result.getDirection().name() : "HOLD");
             payload.put("magnitude", result.getMagnitude());
             payload.put("confidence", result.getConfidence());
             payload.put("predictedVolatility", result.getPredictedVolatility());
@@ -321,6 +348,19 @@ public class LiveMarketStreamService {
             payload.put("targetSensex", result.getTargetSensex());
             payload.put("currentPrice", result.getCurrentPrice());
             payload.put("targetPrice", result.getTargetPrice());
+            // ── Intra-day trading levels ──
+            payload.put("entryPrice", result.getEntryPrice());
+            payload.put("stopLoss", result.getStopLoss());
+            payload.put("riskReward", result.getRiskReward());
+            payload.put("validMinutes", result.getValidMinutes());
+            payload.put("noTradeZone", result.getNoTradeZone() != null && result.getNoTradeZone());
+            payload.put("predictionTimestampMs", result.getPredictionTimestampMs() != null
+                    ? result.getPredictionTimestampMs() : System.currentTimeMillis());
+            // ── Session context ──
+            payload.put("squareOffWarning", isApproachingSquareOff());
+            payload.put("minutesToClose", minutesToClose());
+            payload.put("marketOpen", isWithinTradingHours());
+            // ── Meta ──
             payload.put("predictionDate", result.getPredictionDate() != null ? result.getPredictionDate().toString() : "");
             if (result.getAiQuotaNotice() != null && !result.getAiQuotaNotice().isBlank()) {
                 payload.put("aiQuotaNotice", result.getAiQuotaNotice());
@@ -331,8 +371,11 @@ public class LiveMarketStreamService {
             payload.put("live", predictionSubscribers.containsKey(userId));
             notificationService.sendPredictionToUser(email, payload);
 
-            log.info("[PREDICT] user={} [{}] AI {} conf={}% mag={}%",
-                    userId, horizon, result.getDirection(), result.getConfidence(), result.getMagnitude());
+            log.info("[PREDICT] user={} [{}] {} conf={}% entry={} SL={} TP={} RR={}",
+                    userId, horizon,
+                    result.getDirection(), result.getConfidence(),
+                    result.getEntryPrice(), result.getStopLoss(),
+                    result.getTargetPrice(), result.getRiskReward());
         } catch (Exception e) {
             log.warn("Prediction user={} [{}] failed: {}", userId, horizon, e.getMessage());
         }
@@ -400,17 +443,28 @@ public class LiveMarketStreamService {
     }
 
     private static String normalizeHorizon(String horizon) {
-        return (horizon == null || horizon.isBlank()) ? "1D" : horizon.trim().toUpperCase();
+        if (horizon == null || horizon.isBlank()) return "15M";
+        return switch (horizon.trim().toUpperCase()) {
+            case "5M", "5MIN", "5MINS", "5MINUTE" -> "5M";
+            case "30M", "30MIN", "30MINS", "30MINUTE" -> "30M";
+            default -> "15M";
+        };
     }
 
     private record OhlcvSpec(String period, String interval) {}
 
+    /**
+     * Returns the historical OHLCV period and candle interval for each intra-day horizon.
+     * Using more days of data gives the AI better context for support/resistance levels.
+     *   5M  → last 3 days of 1-minute candles  (~780 bars, ~13 hours of context)
+     *   15M → last 5 days of 5-minute candles  (~375 bars, ~31 hours of context)
+     *   30M → last 7 days of 5-minute candles  (~525 bars, ~44 hours of context)
+     */
     private static OhlcvSpec ohlcvSpecFor(String horizon) {
         return switch (horizon) {
-            case "1H" -> new OhlcvSpec("1M", "5M");
-            case "3D" -> new OhlcvSpec("6M", "1D");
-            case "1W" -> new OhlcvSpec("2Y", "1D");
-            default -> new OhlcvSpec("1Y", "1D");
+            case "5M"  -> new OhlcvSpec("3D", "1M");
+            case "30M" -> new OhlcvSpec("7D", "5M");
+            default    -> new OhlcvSpec("5D", "5M");   // 15M default
         };
     }
 

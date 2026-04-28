@@ -25,15 +25,19 @@ public class MarketDataService {
     private final ObjectMapper objectMapper;
 
     /** OHLCV for the authenticated user's preferred underlying (cache key includes user + instrument). */
-    @Cacheable(value = "marketData", key = "'v5-u'+#userId+'-'+#period+'-'+#interval", unless = "#result.isEmpty()")
+    @Cacheable(value = "marketData", key = "'v6-u'+#userId+'-'+#period+'-'+#interval", unless = "#result.isEmpty()")
     public List<Map<String, Object>> getOhlcvForUser(Long userId, String period, String interval) {
         var end = LocalDateTime.now(IST);
         var start = switch (period) {
+            case "1D" -> end.minusDays(1);
+            case "3D" -> end.minusDays(3);
+            case "5D" -> end.minusDays(5);
+            case "7D" -> end.minusDays(7);
             case "1M" -> end.minusMonths(1);
             case "3M" -> end.minusMonths(3);
             case "6M" -> end.minusMonths(6);
             case "5Y" -> end.minusYears(5);
-            default -> end.minusYears(1);
+            default   -> end.minusYears(1);
         };
         var inst = instrumentRegistry.getPrimaryForUser(userId).orElse(null);
         if (inst == null) {
