@@ -193,6 +193,12 @@ public class MlRestClient {
                 .predictedVolatility(toBigDecimal(r.get("predicted_volatility")))
                 .currentSensex(toBigDecimal(r.get("current_sensex")))
                 .targetSensex(toBigDecimal(r.get("target_sensex")))
+                .entryPrice(toBigDecimal(r.get("entry_price")))
+                .stopLoss(toBigDecimal(r.get("stop_loss")))
+                .targetPrice(toBigDecimal(r.get("target_price")))
+                .riskReward(toBigDecimal(r.get("risk_reward")))
+                .validMinutes(toInt(r.get("valid_minutes")))
+                .noTradeZone(toDouble(r.get("confidence")) < 65.0)
                 .aiQuotaNotice(quota)
                 .predictionReason(reason)
                 .build();
@@ -239,5 +245,12 @@ public class MlRestClient {
         if (x instanceof Number n) return n.longValue();
         try { return Long.parseLong(String.valueOf(x).trim()); }
         catch (NumberFormatException e) { return 0L; }
+    }
+
+    private static Integer toInt(Object x) {
+        if (x == null) return null;
+        if (x instanceof Number n) return n.intValue();
+        try { return Integer.parseInt(String.valueOf(x).trim()); }
+        catch (NumberFormatException e) { return null; }
     }
 }
