@@ -378,6 +378,37 @@ public class LiveMarketStreamService {
                     result.getTargetPrice(), result.getRiskReward());
         } catch (Exception e) {
             log.warn("Prediction user={} [{}] failed: {}", userId, horizon, e.getMessage());
+            try {
+                Map<String, Object> payload = new LinkedHashMap<>();
+                payload.put("engine", "AI");
+                payload.put("horizon", horizon);
+                payload.put("direction", "HOLD");
+                payload.put("magnitude", 0);
+                payload.put("confidence", 0);
+                payload.put("predictedVolatility", 0);
+                payload.put("predictionTimestampMs", System.currentTimeMillis());
+                payload.put("squareOffWarning", isApproachingSquareOff());
+                payload.put("minutesToClose", minutesToClose());
+                payload.put("marketOpen", isWithinTradingHours());
+                payload.put("live", predictionSubscribers.containsKey(userId));
+                payload.put("liveError", true);
+                String msg = e.getMessage() == null ? "Live AI prediction failed" : e.getMessage().trim();
+                if (msg.length() > 280) {
+                    msg = msg.substring(0, 280) + "...";
+                }
+                payload.put("liveErrorMessage", msg);
+                payload.put(
+                        "aiQuotaNotice",
+                        "Live AI update failed on backend. Showing HOLD placeholder until retry succeeds."
+                );
+                payload.put(
+                        "predictionReason",
+                        "The latest live inference call failed. This update is a fallback and not a fresh model forecast."
+                );
+                notificationService.sendPredictionToUser(email, payload);
+            } catch (Exception notifyErr) {
+                log.debug("Failed to send live prediction failure payload: {}", notifyErr.getMessage());
+            }
         }
     }
 
