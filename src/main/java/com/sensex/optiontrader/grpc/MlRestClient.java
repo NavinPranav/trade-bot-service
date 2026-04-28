@@ -185,6 +185,7 @@ public class MlRestClient {
         String reason = pr != null && !pr.toString().isBlank() ? pr.toString().trim() : null;
         return PredictionResponse.builder()
                 .predictionDate(date)
+                .predictionTimestampMs(System.currentTimeMillis())
                 .horizon(String.valueOf(r.getOrDefault("horizon", "")))
                 .direction(parseDirection(String.valueOf(r.getOrDefault("direction", "NEUTRAL"))))
                 .magnitude(toBigDecimal(r.get("magnitude")))

@@ -13,6 +13,7 @@ import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -22,6 +23,7 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class PredictionService {
+    private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
     private final PredictionRepository repo;
     private final MlServiceClient ml;
     private final MlRestClient mlRest;
@@ -73,6 +75,9 @@ public class PredictionService {
                 var p = dbFallback.get();
                 return PredictionResponse.builder()
                         .predictionDate(p.getPredictionDate())
+                        .predictionTimestampMs(p.getCreatedAt() != null
+                                ? p.getCreatedAt().atZone(IST).toInstant().toEpochMilli()
+                                : System.currentTimeMillis())
                         .horizon(p.getHorizon())
                         .direction(p.getDirection())
                         .magnitude(p.getMagnitude())

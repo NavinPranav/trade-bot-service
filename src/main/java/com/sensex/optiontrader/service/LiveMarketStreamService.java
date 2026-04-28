@@ -2,6 +2,7 @@ package com.sensex.optiontrader.service;
 
 import com.sensex.optiontrader.config.AngelOneProperties;
 import com.sensex.optiontrader.config.AppProperties;
+import com.sensex.optiontrader.grpc.MlRestClient;
 import com.sensex.optiontrader.grpc.MlServiceClient;
 import com.sensex.optiontrader.integration.angelone.AngelOneAuthService;
 import com.sensex.optiontrader.integration.angelone.AngelOneMarketDataProvider;
@@ -41,6 +42,7 @@ public class LiveMarketStreamService {
     private final AngelOneMarketDataProvider provider;
     private final NotificationService notificationService;
     private final MlServiceClient mlServiceClient;
+    private final MlRestClient mlRestClient;
     private final MarketDataService marketDataService;
     private final InstrumentRegistry instrumentRegistry;
     private final AngelOneProperties angelOneProps;
@@ -85,6 +87,7 @@ public class LiveMarketStreamService {
                                    AngelOneMarketDataProvider provider,
                                    NotificationService notificationService,
                                    MlServiceClient mlServiceClient,
+                                   MlRestClient mlRestClient,
                                    MarketDataService marketDataService,
                                    InstrumentRegistry instrumentRegistry,
                                    AngelOneProperties angelOneProps,
@@ -95,6 +98,7 @@ public class LiveMarketStreamService {
         this.provider = provider;
         this.notificationService = notificationService;
         this.mlServiceClient = mlServiceClient;
+        this.mlRestClient = mlRestClient;
         this.marketDataService = marketDataService;
         this.instrumentRegistry = instrumentRegistry;
         this.angelOneProps = angelOneProps;
@@ -333,7 +337,17 @@ public class LiveMarketStreamService {
             var vix = marketDataService.getIndiaVixHistory();
             LiveTickData liveTick = latestPrimaryTick(userId);
 
-            var result = mlServiceClient.getGeminiPrediction(horizon, ohlcv, vix, liveTick, userId);
+            PredictionResponse result;
+            try {
+                result = mlServiceClient.getGeminiPrediction(horizon, ohlcv, vix, liveTick, userId);
+            } catch (Exception grpcErr) {
+                log.warn("[PREDICT] gRPC failed for user={} [{}], trying HTTP fallback: {}", userId, horizon, grpcErr.getMessage());
+                if (mlRestClient.isConfigured()) {
+                    result = mlRestClient.predict("AI", horizon, ohlcv, vix, liveTick, userId);
+                } else {
+                    throw grpcErr;
+                }
+            }
 
             updatePredictionCache(horizon, userId, result);
 
