@@ -458,6 +458,14 @@ public class MlServiceClient {
             }
         }
 
+        // If embedded JSON omitted fields, fall back to proto scalars (same values ML put on the wire).
+        if (entryPrice == null && p.getCurrentSensex() != 0) {
+            entryPrice = BigDecimal.valueOf(p.getCurrentSensex());
+        }
+        if (targetPrice == null && p.getTargetSensex() != 0) {
+            targetPrice = BigDecimal.valueOf(p.getTargetSensex());
+        }
+
         double confidence = p.getConfidence();
         boolean noTradeZone = confidence < 65.0;
 
