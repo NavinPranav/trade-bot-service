@@ -9,9 +9,13 @@ import org.springframework.context.annotation.Configuration;
 @ConfigurationProperties(prefix = "app")
 public class AppProperties {
     private Jwt jwt = new Jwt();
+    private Admin admin = new Admin();
     private MlService mlService = new MlService();
     private Market market = new Market();
     private Cache cache = new Cache();
+
+    /** First-time admin creation via {@code POST /api/auth/bootstrap-admin}; leave secret empty to disable. */
+    @Data public static class Admin { private String bootstrapSecret; }
 
     @Data public static class Jwt { private String secret; private long accessTokenExpiryMs; private long refreshTokenExpiryMs; }
     /** gRPC address for the ML server ({@code host} + gRPC listen port, e.g. 50051 — not HTTP 8000). */

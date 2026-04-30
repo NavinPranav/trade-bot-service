@@ -11,6 +11,13 @@ import org.springframework.web.bind.annotation.*;
 public class AuthController {
     private final AuthService authService;
     @PostMapping("/register") public ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest r) { return ResponseEntity.status(HttpStatus.CREATED).body(authService.register(r)); }
+    /** First admin only; requires {@code X-Admin-Bootstrap-Secret} and {@code ADMIN_BOOTSTRAP_SECRET} on the server. */
+    @PostMapping("/bootstrap-admin")
+    public ResponseEntity<AuthResponse> bootstrapAdmin(
+            @RequestHeader("X-Admin-Bootstrap-Secret") String bootstrapSecret,
+            @Valid @RequestBody RegisterRequest r) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(authService.bootstrapAdmin(r, bootstrapSecret));
+    }
     @PostMapping("/login") public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest r) { return ResponseEntity.ok(authService.login(r)); }
     @PostMapping("/refresh") public ResponseEntity<AuthResponse> refresh(@RequestHeader("X-Refresh-Token") String t) { return ResponseEntity.ok(authService.refresh(t)); }
 }

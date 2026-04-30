@@ -3,6 +3,9 @@
 app:
   jwt:
     secret: YOUR_JWT_SECRET_BASE64_MIN_64_CHARS
+  # Optional: one-time first admin via POST /api/auth/bootstrap-admin + X-Admin-Bootstrap-Secret
+  # admin:
+  #   bootstrap-secret: YOUR_LONG_RANDOM_SECRET
   # ML gRPC target (must be gRPC port, e.g. 50051 — NOT FastAPI HTTP 8000)
   # ml-service:
   #   host: localhost

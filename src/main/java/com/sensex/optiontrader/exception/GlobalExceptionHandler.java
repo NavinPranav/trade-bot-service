@@ -18,6 +18,8 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiErrorResponse> h2(BadRequestException e) { return r(HttpStatus.BAD_REQUEST, e.getMessage()); }
     @ExceptionHandler(UnauthorizedException.class)
     public ResponseEntity<ApiErrorResponse> h3(UnauthorizedException e) { return r(HttpStatus.UNAUTHORIZED, e.getMessage()); }
+    @ExceptionHandler(ForbiddenException.class)
+    public ResponseEntity<ApiErrorResponse> hForbidden(ForbiddenException e) { return r(HttpStatus.FORBIDDEN, e.getMessage()); }
     @ExceptionHandler(BadCredentialsException.class)
     public ResponseEntity<ApiErrorResponse> h4(BadCredentialsException e) { return r(HttpStatus.UNAUTHORIZED, "Invalid credentials"); }
     @ExceptionHandler(MlServiceUnavailableException.class)

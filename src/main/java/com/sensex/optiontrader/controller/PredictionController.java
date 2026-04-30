@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/predictions")
 @RequiredArgsConstructor
 public class PredictionController {
+
     private final PredictionService svc;
 
     @GetMapping("/latest")
@@ -20,12 +21,18 @@ public class PredictionController {
         return ResponseEntity.ok(svc.getLatestPrediction(horizon, principal.getId()));
     }
 
+    /**
+     * Paginated prediction history with outcome metrics.
+     * Query params: horizon (optional), page (default 0), size (default 20).
+     * Response includes a summary object with aggregate win-rate, avg confidence, etc.
+     */
     @GetMapping("/history")
     public ResponseEntity<?> history(
             @AuthenticationPrincipal UserPrincipal principal,
-            @RequestParam(defaultValue = "30") int days,
-            @RequestParam(defaultValue = "1D") String horizon) {
-        return ResponseEntity.ok(svc.getPredictionHistory(days, horizon));
+            @RequestParam(required = false) String horizon,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return ResponseEntity.ok(svc.getPredictionHistory(principal.getId(), horizon, page, size));
     }
 
     @GetMapping("/accuracy")

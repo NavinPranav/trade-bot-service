@@ -48,6 +48,7 @@ public class LiveMarketStreamService {
     private final AngelOneProperties angelOneProps;
     private final AppProperties appProps;
     private final CacheManager cacheManager;
+    private final PredictionPersistenceService predictionPersistenceService;
 
     private final AtomicBoolean reconnecting = new AtomicBoolean(false);
     private final AtomicBoolean streamStarted = new AtomicBoolean(false);
@@ -92,7 +93,8 @@ public class LiveMarketStreamService {
                                    InstrumentRegistry instrumentRegistry,
                                    AngelOneProperties angelOneProps,
                                    AppProperties appProps,
-                                   CacheManager cacheManager) {
+                                   CacheManager cacheManager,
+                                   PredictionPersistenceService predictionPersistenceService) {
         this.authService = authService;
         this.wsClient = wsClient;
         this.provider = provider;
@@ -104,6 +106,7 @@ public class LiveMarketStreamService {
         this.angelOneProps = angelOneProps;
         this.appProps = appProps;
         this.cacheManager = cacheManager;
+        this.predictionPersistenceService = predictionPersistenceService;
     }
 
     @PostConstruct
@@ -384,6 +387,12 @@ public class LiveMarketStreamService {
             }
             payload.put("live", predictionSubscribers.containsKey(userId));
             notificationService.sendPredictionToUser(email, payload);
+
+            try {
+                predictionPersistenceService.maybePersist(userId, horizon, result);
+            } catch (Exception persistErr) {
+                log.warn("[PREDICT] Persistence failed for user={} horizon={}: {}", userId, horizon, persistErr.getMessage());
+            }
 
             log.info("[PREDICT] user={} [{}] {} conf={}% entry={} SL={} TP={} RR={}",
                     userId, horizon,

@@ -38,6 +38,9 @@ spring:
     default-property-inclusion: non_null
     time-zone: Asia/Kolkata
 app:
+  admin:
+    # One-time first admin: POST /api/auth/bootstrap-admin with header X-Admin-Bootstrap-Secret. Empty = disabled.
+    bootstrap-secret: ${ADMIN_BOOTSTRAP_SECRET:}
   jwt:
     # Dev-only default; override JWT_SECRET in every deployed environment (never rely on this value in prod).
     secret: ${JWT_SECRET:Y2hhbmdlLW1lLWluLXByb2R1Y3Rpb24tdXNlLWF0LWxlYXN0LTY0LWNoYXJzLWxvbmchIQ==}
