@@ -150,6 +150,8 @@ public class PredictionService {
                 .stopLossHit(p.getStopLossHit())
                 .actualPnlPct(p.getActualPnlPct())
                 .predictionReason(p.getDetail() != null ? p.getDetail().getPredictionReason() : null)
+                .aiTool(p.getAiTool())
+                .aiModel(p.getAiModel())
                 .build();
     }
 

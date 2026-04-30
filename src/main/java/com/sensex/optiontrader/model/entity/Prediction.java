@@ -102,6 +102,14 @@ public class Prediction {
 
     private Boolean correct;
 
+    /** AI tool used for this prediction (e.g. GEMINI). */
+    @Column(length = 50)
+    private String aiTool;
+
+    /** AI model used for this prediction (e.g. gemini-1.5-flash). */
+    @Column(length = 100)
+    private String aiModel;
+
     private LocalDateTime createdAt;
 
     @OneToOne(mappedBy = "prediction", cascade = CascadeType.ALL, fetch = FetchType.LAZY)

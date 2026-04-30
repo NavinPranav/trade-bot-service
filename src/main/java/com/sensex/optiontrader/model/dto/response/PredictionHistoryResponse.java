@@ -33,4 +33,6 @@ public class PredictionHistoryResponse {
     private Boolean stopLossHit;
     private BigDecimal actualPnlPct;
     private String predictionReason;
+    private String aiTool;
+    private String aiModel;
 }

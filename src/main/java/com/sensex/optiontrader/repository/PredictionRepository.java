@@ -35,6 +35,10 @@ public interface PredictionRepository extends JpaRepository<Prediction, Long> {
     @Query("SELECT p FROM Prediction p JOIN FETCH p.user WHERE p.outcomeStatus = 'PENDING' AND p.predictionTimestamp IS NOT NULL AND p.predictionDate = :date")
     List<Prediction> findPendingByDate(@Param("date") LocalDate date);
 
+    /** PENDING rows with a timestamp (validity window can be evaluated). */
+    @Query("SELECT p FROM Prediction p JOIN FETCH p.user WHERE p.outcomeStatus = 'PENDING' AND p.predictionTimestamp IS NOT NULL")
+    List<Prediction> findPendingForOutcomeResolution();
+
     // ── Aggregate metrics for the summary banner ──
     @Query("SELECT COUNT(p) FROM Prediction p WHERE p.user.id = :userId AND (:horizon IS NULL OR p.horizon = :horizon)")
     long countByUserAndHorizon(@Param("userId") Long userId, @Param("horizon") String horizon);

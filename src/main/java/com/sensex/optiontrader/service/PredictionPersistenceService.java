@@ -9,6 +9,7 @@ import com.sensex.optiontrader.model.enums.OutcomeStatus;
 import com.sensex.optiontrader.repository.PredictionDetailRepository;
 import com.sensex.optiontrader.repository.PredictionRepository;
 import com.sensex.optiontrader.repository.UserRepository;
+import com.sensex.optiontrader.service.AiModelService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -30,6 +31,7 @@ public class PredictionPersistenceService {
     private final PredictionDetailRepository detailRepo;
     private final UserRepository userRepo;
     private final InstrumentRegistry instrumentRegistry;
+    private final AiModelService aiModelService;
 
     /**
      * Persists a new prediction only if the previous record for the same user+horizon
@@ -73,6 +75,8 @@ public class PredictionPersistenceService {
                 .validMinutes(result.getValidMinutes())
                 .noTradeZone(result.getNoTradeZone())
                 .outcomeStatus(OutcomeStatus.PENDING)
+                .aiTool(aiModelService.getActiveToolName())
+                .aiModel(aiModelService.getActiveModelId())
                 .createdAt(LocalDateTime.now(IST))
                 .build();
 
