@@ -26,8 +26,9 @@ public class AdminPromptController {
     @GetMapping
     public ResponseEntity<?> history(
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
-        Page<AiPrompt> results = promptService.getHistory(page, size);
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String label) {
+        Page<AiPrompt> results = promptService.getHistory(page, size, label);
         return ResponseEntity.ok(Map.of(
                 "prompts", results.getContent().stream().map(this::toDto).toList(),
                 "totalElements", results.getTotalElements(),

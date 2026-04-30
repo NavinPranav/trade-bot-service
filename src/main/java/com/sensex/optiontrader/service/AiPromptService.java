@@ -38,8 +38,11 @@ public class AiPromptService {
         });
     }
 
-    public Page<AiPrompt> getHistory(int page, int size) {
-        return promptRepo.findAllByOrderByCreatedAtDesc(PageRequest.of(page, size));
+    public Page<AiPrompt> getHistory(int page, int size, String label) {
+        PageRequest pr = PageRequest.of(page, size);
+        return (label == null || label.isBlank())
+                ? promptRepo.findAllByOrderByCreatedAtDesc(pr)
+                : promptRepo.findByLabelContainingIgnoreCaseOrderByCreatedAtDesc(label.trim(), pr);
     }
 
     public Optional<AiPrompt> getActive() {

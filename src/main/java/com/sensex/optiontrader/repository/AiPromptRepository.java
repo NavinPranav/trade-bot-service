@@ -22,4 +22,7 @@ public interface AiPromptRepository extends JpaRepository<AiPrompt, Long> {
 
     @EntityGraph(attributePaths = "createdBy")
     Page<AiPrompt> findAllByOrderByCreatedAtDesc(Pageable pageable);
+
+    @EntityGraph(attributePaths = "createdBy")
+    Page<AiPrompt> findByLabelContainingIgnoreCaseOrderByCreatedAtDesc(String label, Pageable pageable);
 }
