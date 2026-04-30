@@ -5,6 +5,7 @@ import com.sensex.optiontrader.exception.*;
 import com.sensex.optiontrader.model.enums.UserRole;
 import com.sensex.optiontrader.model.dto.request.*;
 import com.sensex.optiontrader.model.dto.response.AuthResponse;
+import com.sensex.optiontrader.model.dto.response.CurrentUserResponse;
 import com.sensex.optiontrader.model.entity.User;
 import com.sensex.optiontrader.repository.InstrumentRepository;
 import com.sensex.optiontrader.repository.UserRepository;
@@ -85,6 +86,15 @@ public class AuthService {
 
     private static boolean secureEquals(String a, String b) {
         return MessageDigest.isEqual(a.getBytes(StandardCharsets.UTF_8), b.getBytes(StandardCharsets.UTF_8));
+    }
+
+    public CurrentUserResponse getCurrentUser(Long userId) {
+        var u = userRepo.findById(userId).orElseThrow(() -> new UnauthorizedException("User not found"));
+        return CurrentUserResponse.builder()
+                .email(u.getEmail())
+                .name(u.getName())
+                .role(u.getRole() != null ? u.getRole().name() : UserRole.USER.name())
+                .build();
     }
 
     public AuthResponse login(LoginRequest req) {
