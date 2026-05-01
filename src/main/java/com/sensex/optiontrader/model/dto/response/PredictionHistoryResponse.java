@@ -35,4 +35,8 @@ public class PredictionHistoryResponse {
     private String predictionReason;
     private String aiTool;
     private String aiModel;
+
+    /** Present when the owning user is loaded (both ALL and MINE scopes). */
+    private Long userId;
+    private String userEmail;
 }

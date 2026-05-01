@@ -40,4 +40,12 @@ public class NotificationService {
     public void sendPredictionToUser(String principalName, Map<String, Object> d) {
         msg.convertAndSendToUser(principalName, "/topic/live-predictions", d);
     }
+
+    /**
+     * Sends a daily analysis notification to one STOMP user.
+     * Client subscribes to {@code /user/topic/daily-analysis}.
+     */
+    public void sendDailyAnalysis(String principalName, Map<String, Object> payload) {
+        msg.convertAndSendToUser(principalName, "/topic/daily-analysis", payload);
+    }
 }

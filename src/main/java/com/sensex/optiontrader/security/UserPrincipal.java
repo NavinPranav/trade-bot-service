@@ -15,6 +15,11 @@ public class UserPrincipal implements UserDetails {
     public static UserPrincipal from(User u) {
         return new UserPrincipal(u.getId(), u.getEmail(), u.getPassword(), List.of(new SimpleGrantedAuthority("ROLE_" + u.getRole().name())));
     }
+
+    public boolean isAdmin() {
+        return authorities.stream().anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()));
+    }
+
     @Override public String getUsername() { return email; }
     @Override public boolean isAccountNonExpired() { return true; }
     @Override public boolean isAccountNonLocked() { return true; }

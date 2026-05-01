@@ -9,6 +9,7 @@ import com.sensex.optiontrader.model.enums.Direction;
 import com.sensex.optiontrader.service.InstrumentRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
@@ -44,9 +45,19 @@ public class MlRestClient {
         this.objectMapper = objectMapper;
 
         String httpUrl = props.getMlService().getHttpUrl();
-        this.restClient = (httpUrl != null && !httpUrl.isBlank())
-                ? RestClient.builder().baseUrl(httpUrl.replaceAll("/+$", "")).build()
-                : null;
+        if (httpUrl != null && !httpUrl.isBlank()) {
+            // SimpleClientHttpRequestFactory uses HttpURLConnection — strict HTTP/1.1, no h2c upgrade.
+            // The JDK default HttpClient sends Upgrade: h2c which uvicorn rejects with 503.
+            var factory = new SimpleClientHttpRequestFactory();
+            factory.setConnectTimeout(10_000);
+            factory.setReadTimeout(130_000);
+            this.restClient = RestClient.builder()
+                    .baseUrl(httpUrl.replaceAll("/+$", ""))
+                    .requestFactory(factory)
+                    .build();
+        } else {
+            this.restClient = null;
+        }
     }
 
     public boolean isConfigured() {
@@ -108,6 +119,34 @@ public class MlRestClient {
         } catch (Exception e) {
             log.error("ML REST /predict failed: {}", e.getMessage());
             throw new MlServiceUnavailableException("ML REST call failed: " + e.getMessage(), e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> analysePredictions(List<Map<String, Object>> predictions) {
+        if (restClient == null) {
+            throw new MlServiceUnavailableException("ML HTTP URL not configured (set ML_SERVICE_HTTP_URL)", null);
+        }
+
+        Map<String, Object> body = Map.of("predictions", predictions);
+
+        try {
+            String reqJson = objectMapper.writeValueAsString(body);
+            log.info("ML REST /admin/analyse: {} predictions", predictions.size());
+
+            Map<String, Object> response = restClient.post()
+                    .uri("/admin/analyse")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(reqJson)
+                    .retrieve()
+                    .body(Map.class);
+
+            return response != null ? response : Map.of();
+        } catch (MlServiceUnavailableException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("ML REST /admin/analyse failed: {}", e.getMessage());
+            throw new MlServiceUnavailableException("ML analyse call failed: " + e.getMessage(), e);
         }
     }
 

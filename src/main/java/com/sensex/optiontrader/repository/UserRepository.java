@@ -22,4 +22,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
     /** Loads user with preferred instrument in one round-trip (safe outside a web request / on worker threads). */
     @Query("SELECT u FROM User u JOIN FETCH u.preferredInstrument WHERE u.id = :id")
     Optional<User> findByIdWithPreferredInstrument(@Param("id") Long id);
+
+    @Query("SELECT u.email FROM User u")
+    List<String> findAllEmails();
 }
