@@ -123,6 +123,43 @@ public class MlRestClient {
     }
 
     @SuppressWarnings("unchecked")
+    public Map<String, Object> getChecklistWeight() {
+        if (restClient == null) {
+            throw new MlServiceUnavailableException("ML HTTP URL not configured (set ML_SERVICE_HTTP_URL)", null);
+        }
+        try {
+            Map<String, Object> response = restClient.get()
+                    .uri("/admin/checklist-weight")
+                    .retrieve()
+                    .body(Map.class);
+            return response != null ? response : Map.of("weight", 40, "remaining", 60);
+        } catch (Exception e) {
+            log.error("ML REST /admin/checklist-weight GET failed: {}", e.getMessage());
+            throw new MlServiceUnavailableException("ML checklist-weight GET failed: " + e.getMessage(), e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> setChecklistWeight(int weight) {
+        if (restClient == null) {
+            throw new MlServiceUnavailableException("ML HTTP URL not configured (set ML_SERVICE_HTTP_URL)", null);
+        }
+        try {
+            String reqJson = objectMapper.writeValueAsString(Map.of("weight", weight));
+            Map<String, Object> response = restClient.put()
+                    .uri("/admin/checklist-weight")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(reqJson)
+                    .retrieve()
+                    .body(Map.class);
+            return response != null ? response : Map.of("status", "ok", "weight", weight);
+        } catch (Exception e) {
+            log.error("ML REST /admin/checklist-weight PUT failed: {}", e.getMessage());
+            throw new MlServiceUnavailableException("ML checklist-weight PUT failed: " + e.getMessage(), e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
     public Map<String, Object> analysePredictions(List<Map<String, Object>> predictions) {
         if (restClient == null) {
             throw new MlServiceUnavailableException("ML HTTP URL not configured (set ML_SERVICE_HTTP_URL)", null);
