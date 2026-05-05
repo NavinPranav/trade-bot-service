@@ -47,6 +47,8 @@ public class PredictionResponse {
     private Boolean noTradeZone;
     /** AI quota/rate-limit notice; non-null means the signal is a HOLD placeholder. */
     private String aiQuotaNotice;
+    /** Set when a directional call was forced to HOLD due to account risk limits. */
+    private String riskLimitNotice;
     /** Natural-language rationale shown in the UI (display portion only, levels stripped). */
     private String predictionReason;
 

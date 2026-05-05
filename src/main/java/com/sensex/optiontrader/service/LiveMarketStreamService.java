@@ -49,6 +49,7 @@ public class LiveMarketStreamService {
     private final AppProperties appProps;
     private final CacheManager cacheManager;
     private final PredictionPersistenceService predictionPersistenceService;
+    private final RiskLimitService riskLimitService;
 
     private final AtomicBoolean reconnecting = new AtomicBoolean(false);
     private final AtomicBoolean streamStarted = new AtomicBoolean(false);
@@ -94,7 +95,8 @@ public class LiveMarketStreamService {
                                    AngelOneProperties angelOneProps,
                                    AppProperties appProps,
                                    CacheManager cacheManager,
-                                   PredictionPersistenceService predictionPersistenceService) {
+                                   PredictionPersistenceService predictionPersistenceService,
+                                   RiskLimitService riskLimitService) {
         this.authService = authService;
         this.wsClient = wsClient;
         this.provider = provider;
@@ -107,6 +109,7 @@ public class LiveMarketStreamService {
         this.appProps = appProps;
         this.cacheManager = cacheManager;
         this.predictionPersistenceService = predictionPersistenceService;
+        this.riskLimitService = riskLimitService;
     }
 
     @PostConstruct
@@ -352,6 +355,8 @@ public class LiveMarketStreamService {
                 }
             }
 
+            result = riskLimitService.applyRiskLimits(result, userId);
+
             updatePredictionCache(horizon, userId, result);
 
             Map<String, Object> payload = new LinkedHashMap<>();
@@ -381,6 +386,9 @@ public class LiveMarketStreamService {
             payload.put("predictionDate", result.getPredictionDate() != null ? result.getPredictionDate().toString() : "");
             if (result.getAiQuotaNotice() != null && !result.getAiQuotaNotice().isBlank()) {
                 payload.put("aiQuotaNotice", result.getAiQuotaNotice());
+            }
+            if (result.getRiskLimitNotice() != null && !result.getRiskLimitNotice().isBlank()) {
+                payload.put("riskLimitNotice", result.getRiskLimitNotice());
             }
             if (result.getPredictionReason() != null && !result.getPredictionReason().isBlank()) {
                 payload.put("predictionReason", result.getPredictionReason());

@@ -58,8 +58,13 @@ public class AdminPromptController {
             return ResponseEntity.badRequest().body(Map.of("error", "prompt_text is required"));
         }
         if (!promptText.contains("{target_minutes}")) {
-            return ResponseEntity.badRequest().body(
-                    Map.of("error", "prompt_text must contain the {target_minutes} dynamic variable"));
+            return ResponseEntity.badRequest().body(Map.of("error",
+                    "prompt_text must contain {target_minutes}. Other supported variables: " +
+                    "{spot_price}, {ema_20}, {ema_50}, {rsi_14}, {vwap}, {atr_14}, {macd}, " +
+                    "{macd_signal}, {macd_histogram}, {india_vix}, {vix_change}, {volume_ratio}, " +
+                    "{support_1}, {support_2}, {resistance_1}, {resistance_2}, {pivot}, " +
+                    "{open}, {high}, {low}, {prev_close}, {day_change_pct}, " +
+                    "{market_phase}, {time_ist}, {last_5_candles}, {min_confidence}, {min_risk_reward}."));
         }
 
         User user = userRepo.findById(principal.getId()).orElseThrow();

@@ -8,6 +8,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.*;
 import org.springframework.data.repository.query.Param;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
@@ -190,4 +191,15 @@ public interface PredictionRepository extends JpaRepository<Prediction, Long> {
             @Param("horizons") List<String> horizons,
             @Param("directionAll") boolean directionAll,
             @Param("directions") List<Direction> directions);
+
+    @Query("SELECT COUNT(p) FROM Prediction p WHERE p.user.id = :userId AND p.predictionDate = :date "
+            + "AND p.direction IN :directional")
+    long countDirectionalSignalsOnDate(
+            @Param("userId") Long userId,
+            @Param("date") LocalDate date,
+            @Param("directional") List<Direction> directional);
+
+    @Query("SELECT COALESCE(SUM(p.actualPnlPct), 0) FROM Prediction p WHERE p.user.id = :userId "
+            + "AND p.predictionDate = :date AND p.outcomeStatus <> 'PENDING' AND p.actualPnlPct IS NOT NULL")
+    BigDecimal sumResolvedPnlPctOnDate(@Param("userId") Long userId, @Param("date") LocalDate date);
 }

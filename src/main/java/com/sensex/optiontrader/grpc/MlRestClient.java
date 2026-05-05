@@ -123,6 +123,23 @@ public class MlRestClient {
     }
 
     @SuppressWarnings("unchecked")
+    public Map<String, Object> getNewsSentiment() {
+        if (restClient == null) {
+            throw new MlServiceUnavailableException("ML HTTP URL not configured (set ML_SERVICE_HTTP_URL)", null);
+        }
+        try {
+            Map<String, Object> response = restClient.get()
+                    .uri("/admin/news-sentiment")
+                    .retrieve()
+                    .body(Map.class);
+            return response != null ? response : Map.of("overall", "UNAVAILABLE", "score", 0);
+        } catch (Exception e) {
+            log.error("ML REST /admin/news-sentiment GET failed: {}", e.getMessage());
+            throw new MlServiceUnavailableException("ML news-sentiment GET failed: " + e.getMessage(), e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
     public Map<String, Object> getChecklistWeight() {
         if (restClient == null) {
             throw new MlServiceUnavailableException("ML HTTP URL not configured (set ML_SERVICE_HTTP_URL)", null);
@@ -156,6 +173,60 @@ public class MlRestClient {
         } catch (Exception e) {
             log.error("ML REST /admin/checklist-weight PUT failed: {}", e.getMessage());
             throw new MlServiceUnavailableException("ML checklist-weight PUT failed: " + e.getMessage(), e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getPredictionPolicy() {
+        if (restClient == null) {
+            throw new MlServiceUnavailableException("ML HTTP URL not configured (set ML_SERVICE_HTTP_URL)", null);
+        }
+        try {
+            Map<String, Object> response = restClient.get()
+                    .uri("/admin/prediction-policy")
+                    .retrieve()
+                    .body(Map.class);
+            return response != null ? response : Map.of();
+        } catch (Exception e) {
+            log.error("ML REST /admin/prediction-policy GET failed: {}", e.getMessage());
+            throw new MlServiceUnavailableException("ML prediction-policy GET failed: " + e.getMessage(), e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> setPredictionPolicy(Map<String, Object> body) {
+        if (restClient == null) {
+            throw new MlServiceUnavailableException("ML HTTP URL not configured (set ML_SERVICE_HTTP_URL)", null);
+        }
+        try {
+            String reqJson = objectMapper.writeValueAsString(body != null ? body : Map.of());
+            Map<String, Object> response = restClient.put()
+                    .uri("/admin/prediction-policy")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(reqJson)
+                    .retrieve()
+                    .body(Map.class);
+            return response != null ? response : Map.of();
+        } catch (Exception e) {
+            log.error("ML REST /admin/prediction-policy PUT failed: {}", e.getMessage());
+            throw new MlServiceUnavailableException("ML prediction-policy PUT failed: " + e.getMessage(), e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> resetPredictionPolicy() {
+        if (restClient == null) {
+            throw new MlServiceUnavailableException("ML HTTP URL not configured (set ML_SERVICE_HTTP_URL)", null);
+        }
+        try {
+            Map<String, Object> response = restClient.delete()
+                    .uri("/admin/prediction-policy")
+                    .retrieve()
+                    .body(Map.class);
+            return response != null ? response : Map.of();
+        } catch (Exception e) {
+            log.error("ML REST /admin/prediction-policy DELETE failed: {}", e.getMessage());
+            throw new MlServiceUnavailableException("ML prediction-policy DELETE failed: " + e.getMessage(), e);
         }
     }
 
