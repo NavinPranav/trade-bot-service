@@ -83,6 +83,15 @@ public class AiPredictionFetchService {
 
         int minBars = minBarsForHorizon(horizon);
         int actualBars = ohlcv != null ? ohlcv.size() : 0;
+        AppProperties.Transport transport = appProperties.getMlService().getTransport();
+        boolean restConfigured = mlRest.isConfigured();
+
+        // One concise per-call log so deploys are easy to verify in prod:
+        //   ML-CALL fetch userId=… horizon=… spec=5D/5M bars=375 minBars=120 transport=REST restConfigured=true
+        // If transport=AUTO appears here when you expected REST → env var didn't reach the JVM.
+        log.info("ML-CALL fetch userId={} horizon={} spec={}/{} bars={} minBars={} transport={} restConfigured={}",
+                userId, horizon, spec.period(), spec.interval(), actualBars, minBars, transport, restConfigured);
+
         if (actualBars < minBars) {
             log.warn("AI fetch userId={} horizon={} insufficient bars (have={} required={}); falling back to last stored prediction",
                     userId, horizon, actualBars, minBars);
@@ -91,9 +100,6 @@ public class AiPredictionFetchService {
                             "Insufficient OHLCV bars for horizon " + horizon + " (have=" + actualBars + " required=" + minBars + ")",
                             null));
         }
-
-        AppProperties.Transport transport = appProperties.getMlService().getTransport();
-        boolean restConfigured = mlRest.isConfigured();
 
         // REST-only deployments (e.g. Render free tier) — skip gRPC entirely so we don't spam 404s.
         if (transport == AppProperties.Transport.REST) {
