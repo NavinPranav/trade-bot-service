@@ -77,6 +77,20 @@ public class MlRestClient {
                     "ML HTTP URL not configured (set ML_SERVICE_HTTP_URL)", null);
         }
 
+        // Defense-in-depth: never ship a thin payload (e.g. 5 bars) to the ML service. This is
+        // also enforced upstream in AiPredictionFetchService / LiveMarketStreamService, but the
+        // REST client may be called from other code paths (e.g. backtest, admin tools) so we
+        // double-check here too. The ML service will return 400 on its own check anyway, but
+        // skipping the round trip avoids log spam and a confusing user-facing error.
+        int actualBars = sensexOhlcv != null ? sensexOhlcv.size() : 0;
+        int minBars = minBarsForHorizon(horizon);
+        if (actualBars < minBars) {
+            throw new MlServiceUnavailableException(
+                    "Refusing REST /predict with insufficient bars: have=" + actualBars
+                            + " required=" + minBars + " horizon=" + horizon,
+                    null);
+        }
+
         var primary = instrumentRegistry.getPrimaryForUser(userId);
         String underlying = primary
                 .map(com.sensex.optiontrader.config.AngelOneProperties.InstrumentToken::name)
@@ -256,6 +270,16 @@ public class MlRestClient {
             log.error("ML REST /admin/analyse failed: {}", e.getMessage());
             throw new MlServiceUnavailableException("ML analyse call failed: " + e.getMessage(), e);
         }
+    }
+
+    private int minBarsForHorizon(String horizon) {
+        var ml = props.getMlService();
+        var map = ml.getMinBarsByHorizon();
+        if (horizon != null && map != null) {
+            Integer v = map.get(horizon.toUpperCase());
+            if (v != null && v > 0) return v;
+        }
+        return Math.max(1, ml.getDefaultMinBars());
     }
 
     private List<Map<String, Object>> toOhlcvBarList(List<Map<String, Object>> rows) {

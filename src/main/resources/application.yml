@@ -58,6 +58,21 @@ app:
     # Showcase default: less frequent than 15s so “Current” / signal does not churn as often (override with LIVE_PREDICTION_INTERVAL_MS).
     live-prediction-interval-ms: ${LIVE_PREDICTION_INTERVAL_MS:60000}
     http-url: ${ML_SERVICE_HTTP_URL:}
+    # AUTO  → try gRPC first, fall back to REST on failure (default; good for local dev with both ports).
+    # REST  → REST only; never attempts gRPC. Use this on Render-style deployments where only the HTTP port is exposed.
+    # GRPC  → gRPC only; no REST fallback (legacy/strict).
+    transport: ${ML_SERVICE_TRANSPORT:AUTO}
+    # Per-horizon minimum OHLCV bars. The backend will skip the prediction (and the ML service will reject the request)
+    # if fewer bars than this are available, so we never feed the AI a 5-bar payload.
+    min-bars-by-horizon:
+      "[5M]": 60
+      "[15M]": 120
+      "[30M]": 80
+      "[1H]": 60
+      "[1D]": 30
+      "[3D]": 30
+      "[1W]": 30
+    default-min-bars: 30
   market:
     trading-hours-start: "09:15"
     trading-hours-end: "15:30"

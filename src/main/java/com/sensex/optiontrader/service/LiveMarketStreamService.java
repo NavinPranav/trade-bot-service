@@ -343,15 +343,36 @@ public class LiveMarketStreamService {
             var vix = marketDataService.getIndiaVixHistory();
             LiveTickData liveTick = latestPrimaryTick(userId);
 
+            int minBars = minBarsForHorizon(horizon);
+            int actualBars = ohlcv != null ? ohlcv.size() : 0;
+            if (actualBars < minBars) {
+                log.warn("[PREDICT] user={} [{}] insufficient OHLCV bars: have={} required={} — skipping prediction to avoid garbage in / garbage out",
+                        userId, horizon, actualBars, minBars);
+                return;
+            }
+
+            AppProperties.Transport transport = appProps.getMlService().getTransport();
+            boolean restConfigured = mlRestClient.isConfigured();
+
             PredictionResponse result;
-            try {
-                result = mlServiceClient.getGeminiPrediction(horizon, ohlcv, vix, liveTick, userId);
-            } catch (Exception grpcErr) {
-                log.warn("[PREDICT] gRPC failed for user={} [{}], trying HTTP fallback: {}", userId, horizon, grpcErr.getMessage());
-                if (mlRestClient.isConfigured()) {
-                    result = mlRestClient.predict("AI", horizon, ohlcv, vix, liveTick, userId);
-                } else {
-                    throw grpcErr;
+            if (transport == AppProperties.Transport.REST) {
+                if (!restConfigured) {
+                    throw new IllegalStateException("ML transport=REST but ML_SERVICE_HTTP_URL not configured");
+                }
+                result = mlRestClient.predict("AI", horizon, ohlcv, vix, liveTick, userId);
+            } else {
+                try {
+                    result = mlServiceClient.getGeminiPrediction(horizon, ohlcv, vix, liveTick, userId);
+                } catch (Exception grpcErr) {
+                    if (transport == AppProperties.Transport.GRPC) {
+                        throw grpcErr;
+                    }
+                    log.warn("[PREDICT] gRPC failed for user={} [{}], trying HTTP fallback: {}", userId, horizon, grpcErr.getMessage());
+                    if (restConfigured) {
+                        result = mlRestClient.predict("AI", horizon, ohlcv, vix, liveTick, userId);
+                    } else {
+                        throw grpcErr;
+                    }
                 }
             }
 
@@ -528,6 +549,20 @@ public class LiveMarketStreamService {
             case "30M" -> new OhlcvSpec("7D", "5M");
             default    -> new OhlcvSpec("5D", "5M");   // 15M default
         };
+    }
+
+    /**
+     * Resolves the minimum number of OHLCV bars we'll send for a horizon.
+     * Falls back to {@code defaultMinBars} from config when the horizon isn't mapped.
+     */
+    private int minBarsForHorizon(String horizon) {
+        AppProperties.MlService ml = appProps.getMlService();
+        Map<String, Integer> map = ml.getMinBarsByHorizon();
+        if (horizon != null && map != null && map.containsKey(horizon.toUpperCase())) {
+            Integer v = map.get(horizon.toUpperCase());
+            if (v != null && v > 0) return v;
+        }
+        return Math.max(1, ml.getDefaultMinBars());
     }
 
     private void healthCheck() {
