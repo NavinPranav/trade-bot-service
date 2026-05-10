@@ -13,6 +13,26 @@ public class AppProperties {
     private MlService mlService = new MlService();
     private Market market = new Market();
     private Cache cache = new Cache();
+    private Outcome outcome = new Outcome();
+
+    /**
+     * Outcome resolution behaviour (Phase 2 — first-touch).
+     * <p>
+     * When {@code firstTouchEnabled=true} (default), the resolver walks the
+     * 1-minute / 5-minute candles inside each prediction's validity window and
+     * marks {@code TARGET_HIT}/{@code STOP_LOSS_HIT} based on whichever level
+     * the price reached <em>first</em> instead of relying on the price at the
+     * window's end (the close-only behaviour).
+     * <p>
+     * {@code stopWinsOnSameBar} is the conservative tie-breaker for cases where
+     * a single OHLC bar straddles both target and stop. The conventional
+     * back-testing assumption — and the one we use — is that the stop fires
+     * first, since we have no intra-bar ordering information.
+     */
+    @Data public static class Outcome {
+        private boolean firstTouchEnabled = true;
+        private boolean stopWinsOnSameBar = true;
+    }
 
     /** First-time admin creation via {@code POST /api/auth/bootstrap-admin}; leave secret empty to disable. */
     @Data public static class Admin { private String bootstrapSecret; }

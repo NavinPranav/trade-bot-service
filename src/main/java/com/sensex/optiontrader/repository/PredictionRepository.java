@@ -202,4 +202,28 @@ public interface PredictionRepository extends JpaRepository<Prediction, Long> {
     @Query("SELECT COALESCE(SUM(p.actualPnlPct), 0) FROM Prediction p WHERE p.user.id = :userId "
             + "AND p.predictionDate = :date AND p.outcomeStatus <> 'PENDING' AND p.actualPnlPct IS NOT NULL")
     BigDecimal sumResolvedPnlPctOnDate(@Param("userId") Long userId, @Param("date") LocalDate date);
+
+    /**
+     * Resolved directional predictions used to fit the ML service's confidence-calibration
+     * map (Phase 4.3). Returns rows where:
+     *  - direction is BUY/SELL (calibration ignores HOLD/BULLISH/BEARISH soft signals)
+     *  - confidence is non-null (the input feature)
+     *  - outcomeStatus has progressed past PENDING (we know the outcome)
+     *  - predictionDate is on/after the cut-off (recency window)
+     *
+     * Optionally filtered to a single horizon. Ordered newest-first so the caller can
+     * enforce a paging limit cleanly.
+     */
+    @Query("SELECT p FROM Prediction p WHERE p.confidence IS NOT NULL "
+            + "AND p.direction IN :directional "
+            + "AND p.outcomeStatus <> 'PENDING' "
+            + "AND p.predictionDate >= :since "
+            + "AND (:horizonAll = true OR p.horizon = :horizon) "
+            + "ORDER BY p.predictionTimestamp DESC")
+    List<Prediction> findResolvedForCalibration(
+            @Param("directional") List<Direction> directional,
+            @Param("since") LocalDate since,
+            @Param("horizonAll") boolean horizonAll,
+            @Param("horizon") String horizon,
+            Pageable pageable);
 }

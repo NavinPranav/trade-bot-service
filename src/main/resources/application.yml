@@ -97,6 +97,13 @@ app:
     prediction-ttl: 300
     options-chain-ttl: 180
     market-data-ttl: 60
+  # Phase 2 — first-touch outcome resolution. Walks candles inside each
+  # prediction's validity window so SL/target hits are detected even when the
+  # close at window end has reverted past the level. Disable by setting
+  # APP_OUTCOME_FIRST_TOUCH_ENABLED=false to fall back to close-only.
+  outcome:
+    first-touch-enabled: ${APP_OUTCOME_FIRST_TOUCH_ENABLED:true}
+    stop-wins-on-same-bar: ${APP_OUTCOME_STOP_WINS_ON_SAME_BAR:true}
 management:
   endpoints.web.exposure.include: health,info,prometheus,metrics
 logging:
