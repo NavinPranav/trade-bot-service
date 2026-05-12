@@ -361,10 +361,15 @@ public class MlServiceClient {
     /**
      * Sends a single live tick to the ML service over a persistent client-streaming gRPC call.
      * The stream is lazily opened on first invocation and reused for subsequent ticks.
+     * No-ops when transport=REST because StreamLiveTicks is a gRPC-only RPC and there is no
+     * REST equivalent — attempting it over HTTP causes a 429/404 storm on Render deployments.
      */
     public void sendLiveTick(String symbol, int exchangeType, String token,
                              double ltp, double open, double high, double low, double close,
                              double change, double changePct, long volume, long timestampMs) {
+        if (props.getMlService().getTransport() == AppProperties.Transport.REST) {
+            return;
+        }
         StreamObserver<LiveTick> stream = getOrCreateTickStream();
         if (stream == null) return;
 

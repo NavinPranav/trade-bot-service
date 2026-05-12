@@ -153,7 +153,13 @@ public class LiveMarketStreamService {
             unsubscribeLivePredictions(removed.userId());
         }
         if (stompSessions.isEmpty()) {
-            shutdownMarketDataPipeline();
+            // Delay teardown by 10 s to absorb transient reconnects (page refresh, tab switch).
+            // If a new STOMP session registers within the window the shutdown is skipped.
+            streamScheduler.schedule(() -> {
+                if (stompSessions.isEmpty()) {
+                    shutdownMarketDataPipeline();
+                }
+            }, 10, TimeUnit.SECONDS);
         }
     }
 
@@ -161,12 +167,14 @@ public class LiveMarketStreamService {
         if (streamStarted.get()) {
             return;
         }
+        // Mark eagerly so that concurrent STOMP registrations (arriving before the async task
+        // finishes) don't each submit their own connect task and hit "already running".
+        streamStarted.set(true);
         streamScheduler.execute(() -> {
             try {
                 authService.login();
                 instrumentRegistry.refreshStreamingSubscriptions();
                 wsClient.connect();
-                streamStarted.set(true);
                 log.info("Angel One live stream started (first authenticated client)");
             } catch (Exception e) {
                 streamStarted.set(false);
@@ -517,7 +525,7 @@ public class LiveMarketStreamService {
             var cache = cacheManager.getCache("predictions");
             if (cache != null) {
                 cache.put(
-                        "v8-AI-" + horizon + "-u" + userId + "-tok" + instrumentRegistry.primaryTokenOrNone(userId),
+                        "v9-AI-" + horizon + "-u" + userId + "-tok" + instrumentRegistry.primaryTokenOrNone(userId),
                         result);
             }
         } catch (Exception e) {
