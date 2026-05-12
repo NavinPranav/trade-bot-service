@@ -357,12 +357,6 @@ public class MlRestClient {
         return out;
     }
 
-    private static long toLong(Object v) {
-        if (v == null) return 0L;
-        if (v instanceof Number n) return n.longValue();
-        try { return Long.parseLong(String.valueOf(v).trim()); } catch (Exception e) { return 0L; }
-    }
-
     private Map<String, Object> buildQuote(List<Map<String, Object>> ohlcvRows, LiveTickData liveTick) {
         if (liveTick != null && liveTick.getLastTradedPrice() > 0) {
             return Map.of(
