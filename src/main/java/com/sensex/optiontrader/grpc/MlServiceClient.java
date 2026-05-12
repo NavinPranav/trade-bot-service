@@ -11,6 +11,8 @@ import com.sensex.optiontrader.grpc.proto.Empty;
 import com.sensex.optiontrader.grpc.proto.FeatureImportanceResponse;
 import com.sensex.optiontrader.grpc.proto.LiveTick;
 import com.sensex.optiontrader.grpc.proto.OhlcvBar;
+import com.sensex.optiontrader.grpc.proto.OptionsChainSummary;
+import com.sensex.optiontrader.grpc.proto.OptionsStrike;
 import com.sensex.optiontrader.grpc.proto.PredictionRequest;
 import com.sensex.optiontrader.grpc.proto.PredictionServiceGrpc;
 import com.sensex.optiontrader.grpc.proto.SensexQuote;
@@ -72,7 +74,7 @@ public class MlServiceClient {
             List<Map<String, Object>> sensexOhlcv,
             List<Map<String, Object>> indiaVixHistory,
             com.sensex.optiontrader.integration.angelone.LiveTickData liveTick) {
-        return callPrediction("ML", horizon, sensexOhlcv, indiaVixHistory, liveTick, null);
+        return callPrediction("ML", horizon, sensexOhlcv, indiaVixHistory, liveTick, null, null);
     }
 
     /**
@@ -84,7 +86,20 @@ public class MlServiceClient {
             List<Map<String, Object>> indiaVixHistory,
             com.sensex.optiontrader.integration.angelone.LiveTickData liveTick,
             Long userId) {
-        return callPrediction("AI", horizon, sensexOhlcv, indiaVixHistory, liveTick, userId);
+        return callPrediction("AI", horizon, sensexOhlcv, indiaVixHistory, liveTick, userId, null);
+    }
+
+    /**
+     * Google Gemini AI prediction with options chain data.
+     */
+    public PredictionResponse getGeminiPrediction(
+            String horizon,
+            List<Map<String, Object>> sensexOhlcv,
+            List<Map<String, Object>> indiaVixHistory,
+            com.sensex.optiontrader.integration.angelone.LiveTickData liveTick,
+            Long userId,
+            List<Map<String, Object>> optionsChain) {
+        return callPrediction("AI", horizon, sensexOhlcv, indiaVixHistory, liveTick, userId, optionsChain);
     }
 
     private PredictionResponse callPrediction(
@@ -93,7 +108,8 @@ public class MlServiceClient {
             List<Map<String, Object>> sensexOhlcv,
             List<Map<String, Object>> indiaVixHistory,
             com.sensex.optiontrader.integration.angelone.LiveTickData liveTick,
-            Long userId) {
+            Long userId,
+            List<Map<String, Object>> optionsChain) {
         sensexOhlcv = normalizeListOfMaps(sensexOhlcv, "sensex_ohlcv");
         indiaVixHistory = normalizeListOfMaps(indiaVixHistory, "india_vix");
 
@@ -119,6 +135,11 @@ public class MlServiceClient {
         }
         req.setSensexQuote(buildQuote(sensexOhlcv, liveTick));
 
+        OptionsChainSummary optProto = buildOptionsChainSummary(optionsChain);
+        if (optProto != null) {
+            req.setOptionsChain(optProto);
+        }
+
         boolean useGemini = "AI".equalsIgnoreCase(engine);
         String rpcName = useGemini ? "GetGeminiPrediction" : "GetPrediction";
 
@@ -126,11 +147,12 @@ public class MlServiceClient {
             var built = req.build();
             if (log.isDebugEnabled()) {
                 log.debug(
-                        "ML {}: horizon={} sensexBars={} indiaVixPoints={} underlying={}",
+                        "ML {}: horizon={} sensexBars={} indiaVixPoints={} underlying={} optionStrikes={}",
                         rpcName, horizon,
                         built.getSensexOhlcvCount(),
                         built.getIndiaVixCount(),
-                        built.getUnderlyingSymbol());
+                        built.getUnderlyingSymbol(),
+                        built.getOptionsChain().getStrikesCount());
             }
             var proto = useGemini ? stub.getGeminiPrediction(built) : stub.getPrediction(built);
             return fromProto(proto);
@@ -138,6 +160,37 @@ public class MlServiceClient {
             log.warn("{} failed: {} — check ML server logs", rpcName, e.getStatus());
             throw grpcErrorHandler.translate(e);
         }
+    }
+
+    private OptionsChainSummary buildOptionsChainSummary(List<Map<String, Object>> chain) {
+        if (chain == null || chain.isEmpty()) return null;
+        var builder = OptionsChainSummary.newBuilder()
+                .setSnapshotTime(java.time.LocalDateTime.now().format(ISO_LOCAL));
+        for (Map<String, Object> row : chain) {
+            try {
+                var strike = OptionsStrike.newBuilder()
+                        .setStrike(toDouble(row.get("strike")))
+                        .setCallOi(toLong(row.get("call_oi")))
+                        .setPutOi(toLong(row.get("put_oi")))
+                        .setCallVolume(toLong(row.get("call_volume")))
+                        .setPutVolume(toLong(row.get("put_volume")))
+                        .setCallIv(toDouble(row.get("call_iv")))
+                        .setPutIv(toDouble(row.get("put_iv")))
+                        .setCallLtp(toDouble(row.get("call_ltp")))
+                        .setPutLtp(toDouble(row.get("put_ltp")))
+                        .build();
+                builder.addStrikes(strike);
+            } catch (Exception e) {
+                log.debug("Skipping invalid options strike row: {}", e.getMessage());
+            }
+        }
+        return builder.getStrikesCount() > 0 ? builder.build() : null;
+    }
+
+    private static long toLong(Object v) {
+        if (v == null) return 0L;
+        if (v instanceof Number n) return n.longValue();
+        try { return Long.parseLong(String.valueOf(v).trim()); } catch (Exception e) { return 0L; }
     }
 
     public FeatureImportanceResponse getFeatureImportance() {

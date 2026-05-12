@@ -4,6 +4,7 @@ import com.sensex.optiontrader.config.AngelOneProperties;
 import com.sensex.optiontrader.config.AppProperties;
 import com.sensex.optiontrader.grpc.MlRestClient;
 import com.sensex.optiontrader.grpc.MlServiceClient;
+import com.sensex.optiontrader.service.OptionsChainService;
 import com.sensex.optiontrader.integration.angelone.AngelOneAuthService;
 import com.sensex.optiontrader.integration.angelone.AngelOneMarketDataProvider;
 import com.sensex.optiontrader.integration.angelone.AngelOneWebSocketClient;
@@ -51,6 +52,8 @@ public class LiveMarketStreamService {
     private final PredictionPersistenceService predictionPersistenceService;
     private final RiskLimitService riskLimitService;
 
+    private final OptionsChainService optionsChainService;
+
     private final AtomicBoolean reconnecting = new AtomicBoolean(false);
     private final AtomicBoolean streamStarted = new AtomicBoolean(false);
 
@@ -96,7 +99,8 @@ public class LiveMarketStreamService {
                                    AppProperties appProps,
                                    CacheManager cacheManager,
                                    PredictionPersistenceService predictionPersistenceService,
-                                   RiskLimitService riskLimitService) {
+                                   RiskLimitService riskLimitService,
+                                   OptionsChainService optionsChainService) {
         this.authService = authService;
         this.wsClient = wsClient;
         this.provider = provider;
@@ -110,6 +114,7 @@ public class LiveMarketStreamService {
         this.cacheManager = cacheManager;
         this.predictionPersistenceService = predictionPersistenceService;
         this.riskLimitService = riskLimitService;
+        this.optionsChainService = optionsChainService;
     }
 
     @PostConstruct
@@ -350,6 +355,7 @@ public class LiveMarketStreamService {
             var ohlcv = marketDataService.getOhlcvForUser(userId, spec.period, spec.interval);
             var vix = marketDataService.getIndiaVixHistory();
             LiveTickData liveTick = latestPrimaryTick(userId);
+            var optionsChain = fetchOptionsChainSafe(userId);
 
             int minBars = minBarsForHorizon(horizon);
             int actualBars = ohlcv != null ? ohlcv.size() : 0;
@@ -367,17 +373,17 @@ public class LiveMarketStreamService {
                 if (!restConfigured) {
                     throw new IllegalStateException("ML transport=REST but ML_SERVICE_HTTP_URL not configured");
                 }
-                result = mlRestClient.predict("AI", horizon, ohlcv, vix, liveTick, userId);
+                result = mlRestClient.predict("AI", horizon, ohlcv, vix, liveTick, userId, optionsChain);
             } else {
                 try {
-                    result = mlServiceClient.getGeminiPrediction(horizon, ohlcv, vix, liveTick, userId);
+                    result = mlServiceClient.getGeminiPrediction(horizon, ohlcv, vix, liveTick, userId, optionsChain);
                 } catch (Exception grpcErr) {
                     if (transport == AppProperties.Transport.GRPC) {
                         throw grpcErr;
                     }
                     log.warn("[PREDICT] gRPC failed for user={} [{}], trying HTTP fallback: {}", userId, horizon, grpcErr.getMessage());
                     if (restConfigured) {
-                        result = mlRestClient.predict("AI", horizon, ohlcv, vix, liveTick, userId);
+                        result = mlRestClient.predict("AI", horizon, ohlcv, vix, liveTick, userId, optionsChain);
                     } else {
                         throw grpcErr;
                     }
@@ -491,6 +497,15 @@ public class LiveMarketStreamService {
         return instrumentRegistry.getPrimaryForUser(userId)
                 .map(i -> provider.getLatestTick(i.token()))
                 .orElse(null);
+    }
+
+    private java.util.List<java.util.Map<String, Object>> fetchOptionsChainSafe(Long userId) {
+        try {
+            return optionsChainService.getOptionsChainForUser(userId);
+        } catch (Exception e) {
+            log.debug("Options chain fetch failed (non-fatal): {}", e.getMessage());
+            return java.util.List.of();
+        }
     }
 
     private void forwardToMlService(LiveTickData tick) {

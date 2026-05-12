@@ -71,6 +71,17 @@ public class MlRestClient {
             List<Map<String, Object>> indiaVixHistory,
             LiveTickData liveTick,
             Long userId) {
+        return predict(engine, horizon, sensexOhlcv, indiaVixHistory, liveTick, userId, null);
+    }
+
+    public PredictionResponse predict(
+            String engine,
+            String horizon,
+            List<Map<String, Object>> sensexOhlcv,
+            List<Map<String, Object>> indiaVixHistory,
+            LiveTickData liveTick,
+            Long userId,
+            List<Map<String, Object>> optionsChain) {
 
         if (restClient == null) {
             throw new MlServiceUnavailableException(
@@ -107,13 +118,17 @@ public class MlRestClient {
         body.put("underlying_symbol", underlying);
         body.put("instrument_token", instrumentToken);
         body.put("engine", engine != null ? engine : "AI");
+        if (optionsChain != null && !optionsChain.isEmpty()) {
+            body.put("options_chain", toOptionsChainList(optionsChain));
+        }
 
         try {
             String reqJson = objectMapper.writeValueAsString(body);
-            log.info("ML REST /predict: engine={} horizon={} bars={} underlying={}",
+            log.info("ML REST /predict: engine={} horizon={} bars={} underlying={} optionStrikes={}",
                     engine, horizon,
                     sensexOhlcv != null ? sensexOhlcv.size() : 0,
-                    underlying);
+                    underlying,
+                    optionsChain != null ? optionsChain.size() : 0);
 
             @SuppressWarnings("unchecked")
             Map<String, Object> response = restClient.post()
@@ -321,6 +336,31 @@ public class MlRestClient {
             points.add(Map.of("timestamp_unix_ms", unixMs, "vix", vv));
         }
         return points;
+    }
+
+    private List<Map<String, Object>> toOptionsChainList(List<Map<String, Object>> chain) {
+        if (chain == null || chain.isEmpty()) return List.of();
+        List<Map<String, Object>> out = new ArrayList<>(chain.size());
+        for (Map<String, Object> row : chain) {
+            Map<String, Object> r = new LinkedHashMap<>();
+            r.put("strike",       toDouble(row.get("strike")));
+            r.put("call_oi",      toLong(row.get("call_oi")));
+            r.put("put_oi",       toLong(row.get("put_oi")));
+            r.put("call_volume",  toLong(row.get("call_volume")));
+            r.put("put_volume",   toLong(row.get("put_volume")));
+            r.put("call_iv",      toDouble(row.get("call_iv")));
+            r.put("put_iv",       toDouble(row.get("put_iv")));
+            r.put("call_ltp",     toDouble(row.get("call_ltp")));
+            r.put("put_ltp",      toDouble(row.get("put_ltp")));
+            out.add(r);
+        }
+        return out;
+    }
+
+    private static long toLong(Object v) {
+        if (v == null) return 0L;
+        if (v instanceof Number n) return n.longValue();
+        try { return Long.parseLong(String.valueOf(v).trim()); } catch (Exception e) { return 0L; }
     }
 
     private Map<String, Object> buildQuote(List<Map<String, Object>> ohlcvRows, LiveTickData liveTick) {

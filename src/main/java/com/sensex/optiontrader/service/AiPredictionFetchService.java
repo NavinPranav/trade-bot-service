@@ -36,6 +36,7 @@ public class AiPredictionFetchService {
     private final MarketDataProvider marketDataProvider;
     private final InstrumentRegistry instrumentRegistry;
     private final AppProperties appProperties;
+    private final OptionsChainService optionsChainService;
 
     /**
      * OHLCV (period, interval) for each horizon.
@@ -101,6 +102,9 @@ public class AiPredictionFetchService {
                             null));
         }
 
+        // Fetch options chain (non-fatal — empty on any error, prompt shows N/A)
+        var optionsChain = fetchOptionsChainSafe(userId);
+
         // REST-only deployments (e.g. Render free tier) — skip gRPC entirely so we don't spam 404s.
         if (transport == AppProperties.Transport.REST) {
             if (!restConfigured) {
@@ -109,7 +113,7 @@ public class AiPredictionFetchService {
             }
             log.debug("prediction=AI (fetch, REST) userId={} horizon={}", userId, horizon);
             try {
-                return mlRest.predict("AI", horizon, ohlcv, indiaVixHistory, liveTick, userId);
+                return mlRest.predict("AI", horizon, ohlcv, indiaVixHistory, liveTick, userId, optionsChain);
             } catch (Exception restErr) {
                 log.warn("REST prediction failed: {}", restErr.getMessage());
                 return dbFallbackOrThrow(horizon, restErr);
@@ -118,7 +122,7 @@ public class AiPredictionFetchService {
 
         try {
             log.debug("prediction=AI (fetch) userId={} horizon={}", userId, horizon);
-            return ml.getGeminiPrediction(horizon, ohlcv, indiaVixHistory, liveTick, userId);
+            return ml.getGeminiPrediction(horizon, ohlcv, indiaVixHistory, liveTick, userId, optionsChain);
         } catch (Exception grpcErr) {
             // GRPC strict mode: rethrow without REST fallback.
             if (transport == AppProperties.Transport.GRPC) {
@@ -129,7 +133,7 @@ public class AiPredictionFetchService {
 
             if (restConfigured) {
                 try {
-                    return mlRest.predict("AI", horizon, ohlcv, indiaVixHistory, liveTick, userId);
+                    return mlRest.predict("AI", horizon, ohlcv, indiaVixHistory, liveTick, userId, optionsChain);
                 } catch (Exception restErr) {
                     log.warn("HTTP REST prediction also failed: {}", restErr.getMessage());
                 }
@@ -157,6 +161,15 @@ public class AiPredictionFetchService {
             }
             throw new MlServiceUnavailableException(
                     "ML service unreachable and no cached predictions for horizon: " + horizon, grpcErr);
+        }
+    }
+
+    private java.util.List<java.util.Map<String, Object>> fetchOptionsChainSafe(Long userId) {
+        try {
+            return optionsChainService.getOptionsChainForUser(userId);
+        } catch (Exception e) {
+            log.debug("Options chain fetch failed (non-fatal): {}", e.getMessage());
+            return java.util.List.of();
         }
     }
 
