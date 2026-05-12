@@ -33,8 +33,7 @@ public class OptionsChainService {
      */
     @Cacheable(
             value = "optionsChain",
-            key = "'v1-oc-'+@instrumentRegistry.primaryTokenOrNone(#userId)",
-            unless = "#result.isEmpty()"
+            key = "'v1-oc-'+@instrumentRegistry.primaryTokenOrNone(#userId)"
     )
     public List<Map<String, Object>> getOptionsChainForUser(Long userId) {
         String name = instrumentRegistry.getPrimaryForUser(userId)

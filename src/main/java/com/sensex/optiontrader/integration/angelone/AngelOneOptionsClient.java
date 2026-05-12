@@ -10,6 +10,7 @@ import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Locale;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,7 +29,7 @@ import java.util.Map;
 @Component
 public class AngelOneOptionsClient {
 
-    private static final DateTimeFormatter EXPIRY_FMT = DateTimeFormatter.ofPattern("ddMMMyyyy");
+    private static final DateTimeFormatter EXPIRY_FMT = DateTimeFormatter.ofPattern("ddMMMyyyy", Locale.ENGLISH);
 
     private final AngelOneAuthService authService;
     private final RestClient restClient;
@@ -83,9 +84,22 @@ public class AngelOneOptionsClient {
                     .retrieve()
                     .body(String.class);
 
+            log.debug("Options chain raw response ({}) first 300 chars: {}", optionType,
+                    raw != null ? raw.substring(0, Math.min(300, raw.length())) : "null");
+
+            if (raw == null || raw.isBlank()) {
+                log.warn("Options chain {} returned empty response", optionType);
+                return Map.of();
+            }
+            if (!raw.stripLeading().startsWith("{") && !raw.stripLeading().startsWith("[")) {
+                log.warn("Options chain {} returned non-JSON response (first 500 chars): {}",
+                        optionType, raw.substring(0, Math.min(500, raw.length())));
+                return Map.of();
+            }
+
             JsonNode root = objectMapper.readTree(raw);
             if (!root.path("status").asBoolean(false)) {
-                log.warn("Angel One options chain error ({}): {}", optionType, raw.substring(0, Math.min(200, raw.length())));
+                log.warn("Angel One options chain status=false ({}): {}", optionType, raw.substring(0, Math.min(200, raw.length())));
                 return Map.of();
             }
 
