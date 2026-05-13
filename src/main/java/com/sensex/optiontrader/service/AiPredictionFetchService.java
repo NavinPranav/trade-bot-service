@@ -36,7 +36,8 @@ public class AiPredictionFetchService {
     private final MarketDataProvider marketDataProvider;
     private final InstrumentRegistry instrumentRegistry;
     private final AppProperties appProperties;
-    private final OptionsChainService optionsChainServicprivate final AiModelService aiModelService;
+    private final OptionsChainService optionsChainService;
+    private final AiModelService aiModelService;
 
     /**
      * OHLCV (period, interval) for each horizon.
