@@ -36,7 +36,7 @@ public class AiPredictionFetchService {
     private final MarketDataProvider marketDataProvider;
     private final InstrumentRegistry instrumentRegistry;
     private final AppProperties appProperties;
-    private final OptionsChainService optionsChainService;
+    private final OptionsChainService optionsChainServicprivate final AiModelService aiModelService;
 
     /**
      * OHLCV (period, interval) for each horizon.
@@ -87,11 +87,16 @@ public class AiPredictionFetchService {
         AppProperties.Transport transport = appProperties.getMlService().getTransport();
         boolean restConfigured = mlRest.isConfigured();
 
+        // Resolve active AI tool so we can route correctly (OpenAI has no gRPC path).
+        String activeToolName = aiModelService.getActiveToolName();
+        boolean isOpenAi = "OPENAI".equalsIgnoreCase(activeToolName);
+        String engine = activeToolName != null ? activeToolName : "AI";
+
         // One concise per-call log so deploys are easy to verify in prod:
-        //   ML-CALL fetch userId=… horizon=… spec=5D/5M bars=375 minBars=120 transport=REST restConfigured=true
+        //   ML-CALL fetch userId=… horizon=… spec=5D/5M bars=375 minBars=120 transport=REST restConfigured=true tool=OPENAI
         // If transport=AUTO appears here when you expected REST → env var didn't reach the JVM.
-        log.info("ML-CALL fetch userId={} horizon={} spec={}/{} bars={} minBars={} transport={} restConfigured={}",
-                userId, horizon, spec.period(), spec.interval(), actualBars, minBars, transport, restConfigured);
+        log.info("ML-CALL fetch userId={} horizon={} spec={}/{} bars={} minBars={} transport={} restConfigured={} tool={}",
+                userId, horizon, spec.period(), spec.interval(), actualBars, minBars, transport, restConfigured, engine);
 
         if (actualBars < minBars) {
             log.warn("AI fetch userId={} horizon={} insufficient bars (have={} required={}); falling back to last stored prediction",
@@ -105,15 +110,19 @@ public class AiPredictionFetchService {
         // Fetch options chain (non-fatal — empty on any error, prompt shows N/A)
         var optionsChain = fetchOptionsChainSafe(userId);
 
-        // REST-only deployments (e.g. Render free tier) — skip gRPC entirely so we don't spam 404s.
-        if (transport == AppProperties.Transport.REST) {
+        // OpenAI has no gRPC support — always route through REST.
+        // Also covers REST-only deployments (e.g. Render free tier).
+        if (transport == AppProperties.Transport.REST || isOpenAi) {
             if (!restConfigured) {
                 throw new MlServiceUnavailableException(
-                        "ML transport is REST but ML_SERVICE_HTTP_URL is not configured", null);
+                        isOpenAi
+                                ? "OpenAI prediction requires REST transport but ML_SERVICE_HTTP_URL is not configured"
+                                : "ML transport is REST but ML_SERVICE_HTTP_URL is not configured",
+                        null);
             }
-            log.debug("prediction=AI (fetch, REST) userId={} horizon={}", userId, horizon);
+            log.debug("prediction={} (fetch, REST) userId={} horizon={}", engine, userId, horizon);
             try {
-                return mlRest.predict("AI", horizon, ohlcv, indiaVixHistory, liveTick, userId, optionsChain);
+                return mlRest.predict(engine, horizon, ohlcv, indiaVixHistory, liveTick, userId, optionsChain);
             } catch (Exception restErr) {
                 log.warn("REST prediction failed: {}", restErr.getMessage());
                 return dbFallbackOrThrow(horizon, restErr);
@@ -121,7 +130,7 @@ public class AiPredictionFetchService {
         }
 
         try {
-            log.debug("prediction=AI (fetch) userId={} horizon={}", userId, horizon);
+            log.debug("prediction={} (fetch, gRPC) userId={} horizon={}", engine, userId, horizon);
             return ml.getGeminiPrediction(horizon, ohlcv, indiaVixHistory, liveTick, userId, optionsChain);
         } catch (Exception grpcErr) {
             // GRPC strict mode: rethrow without REST fallback.
@@ -133,7 +142,7 @@ public class AiPredictionFetchService {
 
             if (restConfigured) {
                 try {
-                    return mlRest.predict("AI", horizon, ohlcv, indiaVixHistory, liveTick, userId, optionsChain);
+                    return mlRest.predict(engine, horizon, ohlcv, indiaVixHistory, liveTick, userId, optionsChain);
                 } catch (Exception restErr) {
                     log.warn("HTTP REST prediction also failed: {}", restErr.getMessage());
                 }

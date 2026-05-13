@@ -51,6 +51,7 @@ public class LiveMarketStreamService {
     private final CacheManager cacheManager;
     private final PredictionPersistenceService predictionPersistenceService;
     private final RiskLimitService riskLimitService;
+    private final AiModelService aiModelService;
 
     private final OptionsChainService optionsChainService;
 
@@ -100,7 +101,8 @@ public class LiveMarketStreamService {
                                    CacheManager cacheManager,
                                    PredictionPersistenceService predictionPersistenceService,
                                    RiskLimitService riskLimitService,
-                                   OptionsChainService optionsChainService) {
+                                   OptionsChainService optionsChainService,
+                                   AiModelService aiModelService) {
         this.authService = authService;
         this.wsClient = wsClient;
         this.provider = provider;
@@ -115,6 +117,7 @@ public class LiveMarketStreamService {
         this.predictionPersistenceService = predictionPersistenceService;
         this.riskLimitService = riskLimitService;
         this.optionsChainService = optionsChainService;
+        this.aiModelService = aiModelService;
     }
 
     @PostConstruct
@@ -350,6 +353,9 @@ public class LiveMarketStreamService {
 
     private void runPrediction(String horizon, Long userId, String email) {
         OhlcvSpec spec = ohlcvSpecFor(horizon);
+        String activeToolName = aiModelService.getActiveToolName();
+        String engine = activeToolName != null ? activeToolName : "AI";
+        boolean isOpenAi = "OPENAI".equalsIgnoreCase(activeToolName);
         try {
             log.info("[PREDICT] user={} [{}] AI fetching {} {} OHLCV", userId, horizon, spec.period, spec.interval);
             var ohlcv = marketDataService.getOhlcvForUser(userId, spec.period, spec.interval);
@@ -369,11 +375,13 @@ public class LiveMarketStreamService {
             boolean restConfigured = mlRestClient.isConfigured();
 
             PredictionResponse result;
-            if (transport == AppProperties.Transport.REST) {
+            if (transport == AppProperties.Transport.REST || isOpenAi) {
                 if (!restConfigured) {
-                    throw new IllegalStateException("ML transport=REST but ML_SERVICE_HTTP_URL not configured");
+                    throw new IllegalStateException(isOpenAi
+                            ? "OpenAI prediction requires REST transport but ML_SERVICE_HTTP_URL not configured"
+                            : "ML transport=REST but ML_SERVICE_HTTP_URL not configured");
                 }
-                result = mlRestClient.predict("AI", horizon, ohlcv, vix, liveTick, userId, optionsChain);
+                result = mlRestClient.predict(engine, horizon, ohlcv, vix, liveTick, userId, optionsChain);
             } else {
                 try {
                     result = mlServiceClient.getGeminiPrediction(horizon, ohlcv, vix, liveTick, userId, optionsChain);
@@ -383,7 +391,7 @@ public class LiveMarketStreamService {
                     }
                     log.warn("[PREDICT] gRPC failed for user={} [{}], trying HTTP fallback: {}", userId, horizon, grpcErr.getMessage());
                     if (restConfigured) {
-                        result = mlRestClient.predict("AI", horizon, ohlcv, vix, liveTick, userId, optionsChain);
+                        result = mlRestClient.predict(engine, horizon, ohlcv, vix, liveTick, userId, optionsChain);
                     } else {
                         throw grpcErr;
                     }
@@ -395,7 +403,7 @@ public class LiveMarketStreamService {
             updatePredictionCache(horizon, userId, result);
 
             Map<String, Object> payload = new LinkedHashMap<>();
-            payload.put("engine", "AI");
+            payload.put("engine", engine);
             payload.put("horizon", result.getHorizon());
             payload.put("direction", result.getDirection() != null ? result.getDirection().name() : "HOLD");
             payload.put("magnitude", result.getMagnitude());
@@ -446,7 +454,7 @@ public class LiveMarketStreamService {
             log.warn("Prediction user={} [{}] failed: {}", userId, horizon, e.getMessage());
             try {
                 Map<String, Object> payload = new LinkedHashMap<>();
-                payload.put("engine", "AI");
+                payload.put("engine", engine);
                 payload.put("horizon", horizon);
                 payload.put("direction", "HOLD");
                 payload.put("magnitude", 0);
