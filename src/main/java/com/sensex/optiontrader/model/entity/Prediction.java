@@ -102,6 +102,9 @@ public class Prediction {
 
     private Boolean correct;
 
+    @Builder.Default
+    private boolean deleted = false;
+
     /** AI tool used for this prediction (e.g. GEMINI). */
     @Column(length = 50)
     private String aiTool;

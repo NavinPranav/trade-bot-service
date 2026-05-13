@@ -290,6 +290,14 @@ public class PredictionService {
         return m;
     }
 
+    @org.springframework.transaction.annotation.Transactional
+    public int softDeletePredictions(List<Long> ids, Long userId, boolean admin) {
+        if (ids == null || ids.isEmpty()) return 0;
+        return admin
+                ? repo.softDeleteByIds(ids)
+                : repo.softDeleteByIdsAndUser(ids, userId);
+    }
+
     public Map<String, Object> analysePredictions(List<Long> predictionIds, Long userId, boolean admin) {
         List<Prediction> all = repo.findAllById(predictionIds);
         List<Prediction> visible = admin

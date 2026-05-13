@@ -55,6 +55,20 @@ public class PredictionController {
         return ResponseEntity.ok(svc.getAccuracyMetrics());
     }
 
+    @DeleteMapping
+    public ResponseEntity<?> delete(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @RequestBody Map<String, Object> body) {
+        @SuppressWarnings("unchecked")
+        List<Number> rawIds = (List<Number>) body.get("predictionIds");
+        if (rawIds == null || rawIds.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "predictionIds is required and must not be empty"));
+        }
+        List<Long> ids = rawIds.stream().map(Number::longValue).toList();
+        int deleted = svc.softDeletePredictions(ids, principal.getId(), principal.isAdmin());
+        return ResponseEntity.ok(Map.of("deleted", deleted));
+    }
+
     @PostMapping("/analyse")
     public ResponseEntity<?> analyse(
             @AuthenticationPrincipal UserPrincipal principal,
