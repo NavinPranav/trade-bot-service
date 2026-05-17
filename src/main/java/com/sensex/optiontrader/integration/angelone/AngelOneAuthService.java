@@ -44,6 +44,17 @@ public class AngelOneAuthService {
     }
 
     /**
+     * Logs in if no JWT token is present. Safe to call from non-STOMP paths (REST predictions,
+     * options chain fetches) — when WebSocket hasn't been established yet the options chain
+     * would silently return empty without this lazy auth.
+     */
+    public synchronized void ensureAuthenticated() {
+        if (jwtToken.get() == null) {
+            login();
+        }
+    }
+
+    /**
      * Full login using client code, password, and a freshly generated TOTP.
      * Must be called before any API or WebSocket usage.
      */

@@ -63,6 +63,8 @@ public class AngelOneOptionsClient {
     }
 
     private Map<String, Map<String, Object>> fetchByType(String name, String expiry, String optionType) {
+        // Lazily authenticate so options chain works even before the first WebSocket/STOMP connection.
+        authService.ensureAuthenticated();
         String jwt = authService.getJwtToken();
         if (jwt == null) {
             log.warn("Not authenticated — cannot fetch options chain");
