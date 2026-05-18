@@ -46,10 +46,17 @@ public class PredictionService {
     private final MlRestClient mlRest;
     private final AiPredictionFetchService aiPredictionFetchService;
     private final RiskLimitService riskLimitService;
+    private final PredictionPersistenceService predictionPersistenceService;
 
     public PredictionResponse getLatestPrediction(String horizon, Long userId) {
         PredictionResponse raw = aiPredictionFetchService.fetchAiPrediction(horizon, userId);
-        return riskLimitService.applyRiskLimits(raw, userId);
+        PredictionResponse result = riskLimitService.applyRiskLimits(raw, userId);
+        try {
+            predictionPersistenceService.maybePersist(userId, horizon, result);
+        } catch (Exception e) {
+            log.warn("[PERSIST] REST prediction persist failed for user={} horizon={}: {}", userId, horizon, e.getMessage());
+        }
+        return result;
     }
 
     /**
